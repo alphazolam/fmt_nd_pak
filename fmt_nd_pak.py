@@ -1,0 +1,1549 @@
+#fmt_nd_pak.py - Uncharted 4 ".pak" plugin for Rich Whitehouse's Noesis
+#Authors: alphaZomega 
+#Special Thanks: icemesh 
+Version = 'v0.03 (February 5, 2023)'
+
+
+#Options: These are global options that change or enable/disable certain features
+#Option															Effect
+GlobalScale = 100												# Set the scale of the imported model
+NoDialog = False												# Disable the UI dialog window on import
+LoadBaseSkeleton = True											# Attempt to load a base skeleton for every rigged model missing bones
+LoadAllLODs	= False												# Load lower detail LODs onto the model. Lower detail LODs will be disabled on exported paks with this option enabled
+LoadTextures = False											# Load textures onto the model
+ConvertTextures = True											# Convert normal maps to put normal X in the red channel and normal Y in the green channel (standard format)
+FlipUVs = False													# Flip UVs and flip texture images rightside-up (NOT IMPLEMENTED)
+LoadAllTextures = False											# Load all textures onto a model, rather than only color and normal maps
+
+# Set the base path from which the plugin will search for pak files and textures:
+BaseDirectory = "F:\\ExtractedGameFiles\\Uncharted4\\"			
+
+
+from inc_noesis import *
+from collections import namedtuple
+import noewin
+import json
+import os
+import re
+import random
+
+class DialogOptions:
+	def __init__(self):
+		self.doLoadTex = LoadTextures
+		self.doLoadBase = LoadBaseSkeleton
+		self.doConvertTex = ConvertTextures
+		self.doFlipUVs = FlipUVs
+		self.doLODs = LoadAllLODs
+		self.loadAllTextures = LoadAllTextures
+		self.baseSkeleton = None
+		self.width = 600
+		self.height = 800
+		dialog = None
+
+dialogOptions = DialogOptions()
+
+def registerNoesisTypes():
+	handle = noesis.register("Naughty Dog PAK", ".pak")
+	noesis.setTypeExportOptions(handle, "-noanims -notex")
+	noesis.addOption(handle, "-nodialog", "Do not display dialog window", 0)
+	noesis.addOption(handle, "-meshfile", "Export using a given source mesh filename", noesis.OPTFLAG_WANTARG)
+	noesis.setHandlerTypeCheck(handle, pakCheckType)
+	noesis.setHandlerLoadModel(handle, pakLoadModel)
+	noesis.setHandlerWriteModel(handle, pakWriteModel)
+	#noesis.setHandlerLoadRGBA(handle, pakLoadRGBA)
+	return 1
+	
+def pakCheckType(data):
+	bs = NoeBitStream(data)
+	magic = bs.readUInt()
+	if magic == 2681 and magic != 68217 and magic != 2147486329:
+		return 1
+	else: 
+		print("Fatal Error: Unknown file magic: " + str(hex(magic)))
+		return 0
+
+def findNextOf(bs, integer, is64=False):
+	start = bs.tell()
+	while not bs.checkEOF() and ((is64 and bs.readInt64()) or bs.readInt()) != integer:
+		pass
+	output = bs.tell()
+	bs.seek(start)
+	return output
+
+def readStringAt(bs, offset):
+	start = bs.tell()
+	bs.seek(offset)
+	output = bs.readString()
+	bs.seek(start)
+	return output
+	
+def readUIntAt(bs, offset):
+	start = bs.tell()
+	bs.seek(offset)
+	output = bs.readUInt()
+	bs.seek(start)
+	return output 
+
+def readFileBytes(filepath, address, size):
+	with open(filepath, 'rb') as f:
+		f.seek(address)
+		return f.read(size)
+		
+
+def encodeImageData(data, width, height, fmt):
+	outputData = NoeBitStream()
+	mipWidth = width
+	mipHeight = height
+	mipCount = 0
+	while mipWidth > 2 or mipHeight > 2:
+		mipData = rapi.imageResample(data, width, height, mipWidth, mipHeight)
+		try:
+			dxtData = rapi.imageEncodeDXT(mipData, 4, mipWidth, mipHeight, fmt)
+		except:
+			dxtData = rapi.imageEncodeRaw(mipData, mipWidth, mipHeight, fmt)
+		outputData.writeBytes(dxtData)
+		if mipWidth > 2: 
+			mipWidth = int(mipWidth / 2)
+		if mipHeight > 2: 
+			mipHeight = int(mipHeight / 2)
+		mipCount += 1
+		
+	return outputData.getBuffer(), mipCount
+
+skelFiles = [
+	"actor77\\adventurer-base.pak",
+	"actor77\\alcazar-base.pak",
+	"actor77\\auctioneer-f-base.pak",
+	"actor77\\avery-base.pak",
+	"actor77\\avery-guard-base.pak",
+	"actor77\\cassie-base.pak",
+	"actor77\\col-tower-sect-1-base.pak",
+	"actor77\\crash-base.pak",
+	"actor77\\elena-base.pak",
+	"actor77\\gustavo-base.pak",
+	"actor77\\jameson-base.pak",
+	"actor77\\lemur-base.pak",
+	"actor77\\light-base.pak",
+	"actor77\\man-false-journals-base.pak",
+	"actor77\\man-letters-base.pak",
+	"actor77\\man-letters-pictures-base.pak",
+	"actor77\\manager-base.pak",
+	"actor77\\monica-base.pak",
+	"actor77\\nadine-base.pak",
+	"actor77\\note-fold-6x9-portrait-base.pak",
+	"actor77\\note-fold-standard-portrait-base.pak",
+	"actor77\\npc-medium-base.pak",
+	"actor77\\npc-normal-base.pak",
+	"actor77\\npc-normal-crowd-base.pak",
+	"actor77\\npc-normal-crowd-fem-base.pak",
+	"actor77\\npc-normal-fem-base.pak",
+	"actor77\\pistol-base.pak",
+	"actor77\\prison-drake-base.pak",
+	"actor77\\rafe-base.pak",
+	"actor77\\rifle-base.pak",
+	"actor77\\samuel-base.pak",
+	"actor77\\sco-bucket-base.pak",
+	"actor77\\sco-map-room-second-corner-pillar-base.pak",
+	"actor77\\sco-map-room-start-corner-pillar-base.pak",
+	"actor77\\sco-map-room-third-corner-pillar-base.pak",
+	"actor77\\smokey-base.pak",
+	"actor77\\sullivan-base.pak",
+	"actor77\\tew-base.pak",
+	"actor77\\throwable-base.pak",
+	"actor77\\vargas-base.pak",
+	"actor77\\young-drake-base.pak",
+	"actor77\\young-samuel-base.pak",
+]
+
+baseSkeletons = {
+	"adventurer": "actor77\\adventurer-base.pak",
+	"alcazar": "actor77\\alcazar-base.pak",
+	"auctioneer": "actor77\\auctioneer-f-base.pak",
+	"avery": "actor77\\avery-base.pak",
+	"avery-guard": "actor77\\avery-guard-base.pak",
+	"bucket": "actor77\\sco-bucket-base.pak",
+	"cassie": "actor77\\cassie-base.pak",
+	"crash": "actor77\\crash-base.pak",
+	"elena": "actor77\\elena-base.pak",
+	"fem": "actor77\\npc-normal-fem-base.pak",
+	"Gun": "actor77\\pistol-base.pak",
+	"gustavo": "actor77\\gustavo-base.pak",
+	"hero": "actor77\\prison-drake-base.pak",
+	"jameson": "actor77\\jameson-base.pak",
+	"lemur": "actor77\\lemur-base.pak",
+	"manager": "actor77\\manager-base.pak",
+	"meduim": "actor77\\npc-medium-base.pak",
+	"monica": "actor77\\monica-base.pak",
+	"nadine": "actor77\\nadine-base.pak",
+	"pistol": "actor77\\pistol-base.pak",
+	"rafe": "actor77\\rafe-base.pak",
+	"rifle": "actor77\\rifle-base.pak",
+	"samuel": "actor77\\samuel-base.pak",
+	"smokey": "actor77\\smokey-base.pak",
+	"smokey": "actor77\\smokey-base.pak",
+	"sull": "actor77\\sullivan-base.pak",
+	"tew": "actor77\\tew-base.pak",
+	"throw": "actor77\\throwable-base.pak",
+	"vargas": "actor77\\vargas-base.pak",
+	"young-drake": "actor77\\young-drake-base.pak",
+	"young-drake": "actor77\\young-drake-base.pak",
+	"young-samuel": "actor77\\young-samuel-base.pak",
+}
+
+dxFormat = {
+	0: "Invalid",
+	2: "R32G32B32A32_Float",
+	3: "R32G32B32A32_Uint",
+	4: "R32G32B32A32_Sint",
+	6: "R32G32B32_Float",
+	7: "R32G32B32_Uint",
+	8: "R32G32B32_Sint",
+	0xA: "R16G16B16A16_Float",
+	0xB: "R16G16B16A16_Unorm",
+	0xC: "R16G16B16A16_Uint",
+	0xD: "R16G16B16A16_Snorm",
+	0xE: "R16G16B16A16_Sint",
+	0x10: "R32G32_Float",
+	0x11: "R32G32_Uint",
+	0x12: "R32G32_Sint",
+	0x13: "R32G8X24",
+	0x14: "D32S8X24",
+	0x15: "R32X8X24",
+	0x16: "X32G8X24",
+	0x18: "R10G10B10A2_Unorm",
+	0x19: "R10G10B10A2_Uint",
+	0x1A: "R11G11B10_Float",
+	0x1C: "R8G8B8A8_Unorm",
+	0x1D: "R8G8B8A8_UnormSrgb",
+	0x1E: "R8G8B8A8_Uint",
+	0x1F: "R8G8B8A8_Snorm",
+	0x20: "R8G8B8A8_Sint",
+	0x22: "R16G16_Float",
+	0x23: "R16G16_Unorm",
+	0x24: "R16G16_Uint",
+	0x25: "R16G16_Snorm",
+	0x26: "R16G16_Sint",
+	0x27: "R32Typeless",
+	0x28: "D32_Float",
+	0x29: "R32_Float",
+	0x2A: "R32_Uint",
+	0x2B: "R32_Sint",
+	0x2C: "R24G8_Typeless",
+	0x2D: "D24S8",
+	0x2E: "R24X8_Unorm",
+	0x2F: "X24G8",
+	0x31: "R8G8_Unorm",
+	0x32: "R8G8_Uint",
+	0x33: "R8G8_Snorm",
+	0x34: "R8G8_Sint",
+	0x35: "R16_Typeless",
+	0x36: "R16_Float",
+	0x37: "D16_Unorm",
+	0x38: "R16_Unorm",
+	0x39: "R16_Uint",
+	0x3A: "R16_Snorm",
+	0x3B: "R16_Sint",
+	0x3D: "R8_Unorm",
+	0x3E: "R8_Uint",
+	0x3F: "R8_Snorm",
+	0x40: "R8_Sint",
+	0x41: "A8_Unorm",
+	0x42: "R1_Unorm",
+	0x46: "Bc1_Typeless",
+	0x47: "Bc1_Unorm",
+	0x48: "Bc1_UnormSrgb",
+	0x49: "Bc2_Typeless",
+	0x4A: "Bc2_Unorm",
+	0x4B: "Bc2_UnormSrgb",
+	0x4C: "Bc3_Typeless",
+	0x4D: "Bc3_Unorm",
+	0x4E: "Bc3_UnormSrgb",
+	0x4F: "Bc4_Typeless",
+	0x50: "Bc4_Unorm",
+	0x51: "Bc4_Snorm",
+	0x52: "Bc5_Typeless",
+	0x53: "Bc5_Unorm",
+	0x54: "Bc5_Snorm",
+	0x55: "B5G6R5_Unorm",
+	0x56: "B5G5R5A1_Unorm",
+	0x57: "B8G8R8A8_Unorm",
+	0x58: "B8G8R8X8_Unorm",
+	0x59: "R10G10B10A2_Unorm_2",
+	0x5A: "B8G8R8A8_Unorm_2",
+	0x5B: "B8G8R8A8_UnormSrgb",
+	0x5C: "B8G8R8X8_Typeless",
+	0x5D: "B8G8R8X8_UnormSrgb",
+	0x5E: "Bc6Typeless",
+	0x5F: "Bc6_Uf16",
+	0x60: "Bc6_Sf16",
+	0x61: "Bc7_Typeless",
+	0x62: "Bc7_Unorm",
+	0x63: "Bc7_UnormSrgb",
+	0x64: "B16G16R16A16_Float" 
+}
+
+gdRawDataStarts = {
+	"global-dict.pak":  940048,
+	"global-dict-1.pak":  1083904,
+	"global-dict-2.pak":  959456,
+	"global-dict-3.pak":  1041088,
+	"global-dict-4.pak":  924576,
+	"global-dict-5.pak":  1013456,
+	"global-dict-6.pak":  781216,
+	"global-dict-7.pak":  740640,
+	"global-dict-8.pak":  853104,
+	"global-dict-9.pak":  551888,
+	"global-dict-10.pak":  301056,
+	"global-dict-11.pak":  923936,
+	"global-dict-12.pak":  850656,
+	"global-dict-13.pak":  839584,
+	"global-dict-14.pak":  229456,
+	"global-dict-15.pak":  227216,
+	"global-dict-16.pak":  277968,
+	"global-dict-17.pak":  192960,
+	"global-dict-18.pak":  448832,
+	"global-dict-19.pak":  506752,
+	"global-dict-20.pak":  391920,
+}
+
+
+
+
+class openOptionsDialogWindow:
+	
+	def __init__(self, width=dialogOptions.width, height=dialogOptions.height, args=[]):
+		global dialogOptions
+		self.width = width
+		self.height = height
+		self.pak = args.get("pak") or None
+		self.myPath = rapi.getLocalFileName(self.pak.path or rapi.getInputName())
+		self.baseDir = rapi.getDirForFilePath(self.pak.path or rapi.getInputName())
+		self.allFiles = []
+		for item in os.listdir(self.baseDir):
+			if os.path.isfile(os.path.join(self.baseDir, item)) and item.find(".pak") != -1:
+				self.allFiles.append(item)
+		self.allFiles = sorted(self.allFiles)	
+		self.loadItems = [self.myPath]
+		self.pakIdx = self.allFiles.index(self.myPath)
+		self.baseIdx = -1
+		self.loadIdx = -1
+		self.currDirIdx = -1
+		self.isCancelled = False
+		dialogOptions.dialog = self
+		
+		
+	def setWidthAndHeight(self, width=dialogOptions.width, height=dialogOptions.width):
+		self.width = width or self.width
+		self.height = height or self.height
+		
+	def openOptionsButtonLoadEntry(self, noeWnd, controlId, wParam, lParam):
+		self.noeWnd.closeWindow()
+			
+	def openOptionsButtonCancel(self, noeWnd, controlId, wParam, lParam):
+		self.isCancelled = True
+		#self.pak.dumpGlobalVramHashes()
+		self.noeWnd.closeWindow()
+		
+	def selectDirListItem(self, noeWnd, controlId, wParam, lParam):
+		if self.currDirIdx != self.dirList.getSelectionIndex():
+			self.currDirIdx = self.dirList.getSelectionIndex()
+			dialogOptions.currentDir = self.dirList.getStringForIndex(self.currDirIdx)
+			self.allFiles = []
+			self.baseDir = os.path.dirname(self.baseDir[:-1]) + "\\" + dialogOptions.currentDir
+			for item in os.listdir(self.baseDir):
+				if os.path.isfile(os.path.join(self.baseDir, item)) and item.find(".pak") != -1:
+					self.allFiles.append(item)
+			self.allFiles = sorted(self.allFiles)	
+			index = self.noeWnd.createListBox(5, 60, dialogOptions.width-20, 400, self.selectPakListItem, noewin.CBS_DROPDOWNLIST)
+			self.pakList = self.noeWnd.getControlByIndex(index)
+			self.setPakListBox()
+		
+	def setDirList(self, list_object=None, current_item=None):
+		path = self.pak.path or rapi.getInputName()
+		for folderName in os.listdir(self.baseDir+".."):
+			if os.path.isdir(os.path.join(self.baseDir+"..\\", folderName)):
+				self.dirList.addString(folderName)
+				if path.find(folderName) != -1:
+					self.dirList.selectString(folderName)
+					self.currDirIdx = self.dirList.getSelectionIndex()
+					dialogOptions.currentDir = folderName
+		
+	def selectBaseListItem(self, noeWnd, controlId, wParam, lParam):
+		self.baseIdx = self.baseList.getSelectionIndex()
+		dialogOptions.baseSkeleton = self.baseList.getStringForIndex(self.baseIdx)
+		
+	def setBaseList(self, list_object=None, current_item=None):
+		for path in skelFiles:
+			self.baseList.addString(path)
+		for hint, fileName in baseSkeletons.items():
+			if self.myPath.find(hint) != -1:
+				self.baseList.selectString(fileName)
+				self.baseIdx = self.baseList.getSelectionIndex()
+				dialogOptions.baseSkeleton = fileName
+		
+	def selectPakListItem(self, noeWnd, controlId, wParam, lParam):
+		if self.pakIdx != self.pakList.getSelectionIndex() and self.pakIdx != -1 and self.pakList.getStringForIndex(self.pakList.getSelectionIndex()) not in self.loadItems:
+			self.pakIdx = self.pakList.getSelectionIndex()
+			self.loadItems.append(self.pakList.getStringForIndex(self.pakIdx))
+			self.loadList.addString(self.pakList.getStringForIndex(self.pakIdx))
+			self.loadItems = sorted(self.loadItems)
+			#self.loadList.selectString(self.pakList.getStringForIndex(self.pakIdx))
+			#self.loadIdx = self.loadList.getSelectionIndex()
+		
+	def setPakListBox(self, list_object=None, current_item=None):
+		self.pakIdx = current_item or self.pakIdx
+		for path in self.allFiles:
+			self.pakList.addString(path)
+		self.pakList.selectString(self.allFiles[self.pakIdx])
+	
+	def selectLoadListItem(self, noeWnd, controlId, wParam, lParam):
+		self.loadIdx = self.loadList.getSelectionIndex()
+		if self.loadIdx != -1 and self.loadIdx < len(self.loadItems) and self.loadItems[self.loadIdx] != self.myPath:
+			self.loadList.removeString(self.loadItems[self.loadIdx])
+			del self.loadItems[self.loadIdx]
+			self.loadIdx = self.loadIdx if self.loadIdx < len(self.loadItems) else self.loadIdx - 1
+			self.loadList.selectString(self.loadItems[self.loadIdx])
+			
+	def setLoadListBox(self, list_object=None, current_item=None):
+		self.loadList.addString(self.loadItems[0])
+		self.loadList.selectString(self.pak.path or rapi.getInputName())
+	
+	def checkLoadTexCheckbox(self, noeWnd, controlId, wParam, lParam):
+		dialogOptions.doLoadTex = not dialogOptions.doLoadTex
+		self.loadTexCheckbox.setChecked(dialogOptions.doLoadTex)
+		
+	def checkBaseCheckbox(self, noeWnd, controlId, wParam, lParam):
+		dialogOptions.doLoadBase = not dialogOptions.doLoadBase
+		self.loadBaseCheckbox.setChecked(dialogOptions.doLoadBase)
+		
+	def checkLODsCheckbox(self, noeWnd, controlId, wParam, lParam):
+		dialogOptions.doLODs = not dialogOptions.doLODs
+		self.LODsCheckbox.setChecked(dialogOptions.doLODs)
+		
+	def checkConvTexCheckbox(self, noeWnd, controlId, wParam, lParam):
+		dialogOptions.doConvertTex = not dialogOptions.doConvertTex
+		self.convTexCheckbox.setChecked(dialogOptions.doConvertTex)
+		
+	def checkFlipUVsCheckbox(self, noeWnd, controlId, wParam, lParam):
+		dialogOptions.doFlipUVs = not dialogOptions.doFlipUVs
+		self.flipUVsCheckbox.setChecked(dialogOptions.doFlipUVs)
+		
+	def checkLoadAllTexCheckbox(self, noeWnd, controlId, wParam, lParam):
+		dialogOptions.loadAllTextures = not dialogOptions.loadAllTextures
+		self.loadAllTexCheckbox.setChecked(dialogOptions.loadAllTextures)
+		
+	def create(self, width=dialogOptions.width, height=dialogOptions.height):
+		self.noeWnd = noewin.NoeUserWindow("Naughty Dog .pak Tool:        " + rapi.getLocalFileName(self.myPath), "HTRAWWindowClass", width, height) 
+		noeWindowRect = noewin.getNoesisWindowRect()
+		if noeWindowRect:
+			windowMargin = 100
+			self.noeWnd.x = noeWindowRect[0] + windowMargin
+			self.noeWnd.y = noeWindowRect[1] + windowMargin  
+		return self.noeWnd.createWindow()
+			
+	def createPakWindow(self, width=dialogOptions.width, height=dialogOptions.height):
+		
+		if self.create(width, height):
+			
+			self.noeWnd.setFont("Futura", 14)
+			self.noeWnd.createStatic("Base:", 10, 5, width-20, 20)
+			
+			index = self.noeWnd.createComboBox(50, 5, width-65, 20, self.selectBaseListItem, noewin.CBS_DROPDOWNLIST)
+			self.baseList = self.noeWnd.getControlByIndex(index)
+			self.setBaseList(self.baseList, baseSkeletons["hero"])
+			
+			self.noeWnd.createStatic("Files from:", 5, 45, width-20, 20)
+			index = self.noeWnd.createComboBox(80, 40, width-95, 20, self.selectDirListItem, noewin.CBS_DROPDOWNLIST)
+			self.dirList = self.noeWnd.getControlByIndex(index)
+			self.setDirList(self.dirList)
+			
+			index = self.noeWnd.createListBox(5, 70, width-20, 400, self.selectPakListItem, noewin.CBS_DROPDOWNLIST)
+			self.pakList = self.noeWnd.getControlByIndex(index)
+			self.setPakListBox()
+			
+			#self.noeWnd.createButton("Add", width - 200, 455, 80, 30, self.openOptionsButtonLoadEntry)
+			#self.noeWnd.createButton("Remove", width - 100, 455, 80, 30, self.openOptionsButtonCancel)
+			self.noeWnd.createStatic("Files to load:", 5, 485, width-20, 20)
+			
+			index = self.noeWnd.createListBox(5, 505, width-20, 150, self.selectLoadListItem, noewin.CBS_DROPDOWNLIST)
+			self.loadList = self.noeWnd.getControlByIndex(index)
+			self.setLoadListBox()
+			
+			index = self.noeWnd.createCheckBox("Load Textures", 10, 660, 130, 30, self.checkLoadTexCheckbox)
+			self.loadTexCheckbox = self.noeWnd.getControlByIndex(index)
+			self.loadTexCheckbox.setChecked(dialogOptions.doLoadTex)
+			
+			index = self.noeWnd.createCheckBox("Load Base (Skeleton)", 140, 660, 160, 30, self.checkBaseCheckbox)
+			self.loadBaseCheckbox = self.noeWnd.getControlByIndex(index)
+			self.loadBaseCheckbox.setChecked(dialogOptions.doLoadBase)
+			
+			index = self.noeWnd.createCheckBox("Import LODs", 320, 660, 160, 30, self.checkLODsCheckbox)
+			self.LODsCheckbox = self.noeWnd.getControlByIndex(index)
+			self.LODsCheckbox.setChecked(dialogOptions.doLODs)
+			
+			index = self.noeWnd.createCheckBox("Convert Textures", 10, 690, 130, 30, self.checkConvTexCheckbox)
+			self.convTexCheckbox = self.noeWnd.getControlByIndex(index)
+			self.convTexCheckbox.setChecked(dialogOptions.doConvertTex)
+			
+			#index = self.noeWnd.createCheckBox("Flip UVs", 140, 680, 130, 30, self.checkFlipUVsCheckbox)
+			#self.flipUVsCheckbox = self.noeWnd.getControlByIndex(index)
+			#self.flipUVsCheckbox.setChecked(dialogOptions.doFlipUVs)
+			
+			index = self.noeWnd.createCheckBox("Load All Textures", 140, 690, 130, 30, self.checkLoadAllTexCheckbox)
+			self.loadAllTexCheckbox = self.noeWnd.getControlByIndex(index)
+			self.loadAllTexCheckbox.setChecked(dialogOptions.loadAllTextures)
+
+			self.noeWnd.createButton("Load", 5, height-70, width-160, 30, self.openOptionsButtonLoadEntry)
+			self.noeWnd.createButton("Cancel", width-96, height-70, 80, 30, self.openOptionsButtonCancel)
+			self.noeWnd.doModal()
+
+StreamDesc = namedtuple("StreamDesc", "type offset stride")
+
+SkinDesc = namedtuple("SkinDesc", "mapOffset weightsOffset")
+
+PakEntry = namedtuple("PakEntry", "type offset")
+
+class PakSubmesh:
+	def __init__(self, name=None, numVerts=None, numIndices=None, facesOffset=None, streamDescs=None, skinDesc=None, nrmRecalcDesc=None):
+		self.name = name
+		self.numVerts = numVerts
+		self.numIndices = numIndices
+		self.streamDescs = streamDescs
+		self.skinDesc = skinDesc
+		self.nrmRecalcDesc = nrmRecalcDesc
+		self.facesOffset = facesOffset
+
+class PakFile:
+	def __init__(self, bs, args={}):
+		self.bs = bs
+		self.pakPageEntries = []
+		self.pointerPageIds = {}
+		self.entriesList = []
+		self.submeshes = []
+		self.args = args
+		self.path = args.get("path")
+		self.texList = args.get("texList") or []
+		self.matList = args.get("matList") or []
+		self.matNames = args.get("matNames") or []
+		self.vramHashes = args.get("vramHashes") or []
+		self.jointOffset = None
+		self.geoOffset = None
+		self.boneList = None
+		self.boneMap = None
+		self.boneDict = None
+		self.doLODs = False
+		if args.get("doRead"):
+			self.readPak()
+		
+	def getPointerFixupPage(self, readAddr):
+		if readAddr in self.pointerPageIds:
+			return self.pointerPageIds[readAddr]
+		return None
+		
+	def readPointerFixup(self, bs=None):
+		bs = bs or self.bs
+		readAddr = bs.tell()
+		offset = bs.readInt64()
+		if offset > 0:
+			pageId = self.getPointerFixupPage(readAddr)
+			if pageId != None:
+				return offset + self.pakPageEntries[pageId][0]
+			print("ReadAddr not" + asdf + " found in PointerFixups!", readAddr, pageId)
+		return offset
+	
+	def loadBaseSkeleton(self, skelPath):
+		if skelPath and rapi.checkFileExists(skelPath):
+			skelPak = PakFile(NoeBitStream(rapi.loadIntoByteArray(skelPath)), {'path':skelPath})
+			skelPak.readPak()
+			self.boneList = skelPak.boneList
+			self.boneMap = skelPak.boneMap
+			#self.boneNames = skelPak.boneNames
+		else:
+			print("Failed to load base skeleton")
+	
+	def makeVramHashJson(self, jsons):
+		fileName = rapi.getLocalFileName(self.path)
+		jsons[fileName] = {}
+		for hash, subTuple in self.vrams.items():
+			jsons[fileName][hash] = subTuple[0]
+			
+	def dumpGlobalVramHashes(self):
+		file = open(noesis.getPluginsPath() + "python\\U4TextureHashes.json") or {}
+		jsons = json.load(file) if file else {}
+		root = os.path.dirname(dialogOptions.dialog.baseDir[:-1])+"\\textureDict2\\"
+		for fileName in os.listdir(root):
+			if fileName:
+				'''ds = NoeBitStream(rapi.loadIntoByteArray(root + fileName))
+				pageCt = readUIntAt(ds, 16)
+				ds.seek(readUIntAt(ds, 20)+12*(pageCt-1))
+				rawDataAddr = ds.readUInt() + ds.readUInt()
+				gdRawDataStarts[fileName] = rawDataAddr
+				print(fileName, "=", rawDataAddr )'''
+			'''if fileName.find("global-dict")  != -1 and fileName not in jsons:
+				dictPak = PakFile(NoeBitStream(rapi.loadIntoByteArray(root + fileName)), {"path": root + fileName})
+				dictPak.readPak()
+				dictPak.makeVramHashJson(jsons)
+				with open(noesis.getPluginsPath() + "python\\U4TextureHashes.json", "w") as outfile:
+					json.dump(jsons, outfile)'''
+	
+	def writeVRAMImage(self, vramOffset, filepath):
+		if rapi.checkFileExists(filepath):
+			bs = self.bs
+			vramOffset = vramOffset or bs.tell()
+			offset = readUIntAt(bs, vramOffset+40)
+			vramSize = readUIntAt(bs, vramOffset+48)
+			imgFormat = readUIntAt(bs, vramOffset+72)
+			fmtName = dxFormat.get(imgFormat) or ""
+			newDataOffset = bs.getSize()
+			rawDataStart = self.pakPageEntries[len(self.pakPageEntries)-1][0] + self.pakPageEntries[len(self.pakPageEntries)-1][1]
+			
+			#fetch dds data
+			ds = NoeBitStream(rapi.loadIntoByteArray(filepath))
+			magic = ds.readUInt()
+			hdrSize = ds.readUInt()
+			flags = ds.readUInt()
+			height = ds.readUInt()
+			width = ds.readUInt()
+			pitchOrLinearSize = ds.readUInt()
+			depth = ds.readUInt()
+			numMips = ds.readUInt()
+			ds.seek(44 + 8, 1)
+			compressionType = ds.readUInt()
+			
+			ds.seek(hdrSize+4)
+			imgBytes = ds.readBytes(ds.getSize() - ds.tell())
+			
+			bs.seek(vramOffset+40)
+			bs.writeUInt(newDataOffset - rawDataStart) #new offset
+			bs.seek(vramOffset+48)
+			bs.writeUInt(len(imgBytes)) #new size
+			bs.seek(vramOffset+84)
+			bs.writeUInt(width) #new width
+			bs.seek(vramOffset+88)
+			bs.writeUInt(height) #new height
+			bs.seek(vramOffset+80)
+			bs.writeUInt(numMips) #new mips
+			
+			bs.seek(32)
+			bs.writeUInt(readUIntAt(bs, bs.tell())+len(imgBytes)) #added size to raw_data
+			
+			#replace hashes
+			bs.seek(vramOffset+56)
+			hashOld = bs.readBytes(8)
+			bs.seek(-8, 1)
+			hashNew = struct.pack('<Q', bs.readUInt64() + 1)
+			
+			bs.seek(0)
+			searchBytes = bs.readBytes(rawDataStart)
+			bs.seek(0)
+			bs.writeBytes(searchBytes.replace(hashOld, hashNew))
+			
+			#write image data
+			bs.seek(newDataOffset)
+			bs.writeBytes(imgBytes)
+			
+			return 1
+			
+		else:
+			print("Texture not found:", filepath)
+	
+	def loadVRAM(self, vramOffset=0):
+		
+		bs = self.bs
+		vramOffset = vramOffset or bs.tell()
+		bs.seek(vramOffset + 40)
+		pakOffset = bs.readUInt()
+		unknown0 = bs.readUInt()
+		vramSize = bs.readUInt()
+		textureDictId = bs.readUInt()
+		m_hash = bs.readUInt64()
+		unknown1 = bs.readUInt()
+		m_type = bs.readUInt()
+		imgFormat = bs.readUInt()
+		field_2C = bs.readUInt()
+		m_mipCount = bs.readUInt()
+		m_width = bs.readUInt()
+		m_height = bs.readUInt()
+		field_3C = bs.readUInt()
+		m_streamFlags = bs.readUInt()
+		
+		texFileName = self.vrams[m_hash][1]
+		texPath = readStringAt(bs, bs.tell()+12)
+		bigVramOffset = None
+		for fileName, subDict in self.texDict.items():
+			if rapi.checkFileExists(BaseDirectory + "texturedict2\\" + fileName):
+				bigVramOffset = subDict.get(str(m_hash))
+				if bigVramOffset: break
+				
+		if bigVramOffset: 
+			vramBytes = readFileBytes(BaseDirectory + "texturedict2\\" + fileName, bigVramOffset, 1024)
+			vramStream = NoeBitStream(vramBytes)
+			offset = readUIntAt(vramStream, 40)
+			m_width = readUIntAt(vramStream, 84)
+			m_height = readUIntAt(vramStream, 88)
+			vramSize = readUIntAt(vramStream, 48)
+			imgFormat = readUIntAt(vramStream, 72)
+			print("VRAM texture hash found!", fileName, '{:02X}'.format(m_hash), texFileName) #offset + gdRawDataStarts[fileName], m_width, m_height, vramSize, imgFormat, "\n", texFileName)
+			imageData = readFileBytes(BaseDirectory + "texturedict2\\" + fileName, offset + gdRawDataStarts[fileName], vramSize)
+		else:
+			print("Texture hash not found in json:", m_hash, "\n", texFileName)
+			bs.seek(pakOffset + self.pakPageEntries[len(self.pakPageEntries)-1][0] + self.pakPageEntries[len(self.pakPageEntries)-1][1])
+			imageData = bs.readBytes(vramSize)
+			
+		fmtName = dxFormat.get(imgFormat) or ""
+		
+		if fmtName.find("Bc1") != -1:
+			print("BC1")
+			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_DXT1)
+		elif fmtName.find("Bc3") != -1:
+			print("BC3")
+			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC3)
+		elif fmtName.find("Bc4") != -1:
+			print("BC4")
+			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC4)
+		elif fmtName.find("Bc5") != -1:
+			print("BC5")
+			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC5)
+		elif fmtName.find("Bc6") != -1: 
+			print("BC6")
+			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC6H)
+		elif fmtName.find("Bc7") != -1: 
+			print("BC7")
+			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC7)
+			if dialogOptions.doConvertTex and texFileName.find("-ao") != -1:
+				texData = rapi.imageEncodeRaw(texData, m_width, m_height, "g16b16")
+				texData = rapi.imageDecodeRaw(texData, m_width, m_height, "r16g16")
+		elif re.search("[RGBA]\d\d?", fmtName):
+			fmtName = fmtName.split("_")[0].lower()
+			print("RGBA: ", fmtName)
+			try:
+				texData = rapi.imageDecodeRaw(imageData, m_width, m_height, fmtName)
+			except:
+				print("Failed to decode raw image type", fmtName)
+		else:
+			print("Error: Unsupported texture type: " + str(imgFormat) + "  " + fmtName)
+			return []
+			
+		return NoeTexture(texFileName, m_width, m_height, texData, noesis.NOESISTEX_RGBA32)
+			
+		print("Failed to locate texture dict", path)
+		return []
+	
+	def readPakHeader(self):
+	
+		print ("Reading", self.path or rapi.getInputName())
+		readPointerFixup = self.readPointerFixup
+		
+		bs = self.bs
+		bs.seek(0)
+		m_magic = bs.readUInt()						#0x0 0x00000A79
+		if m_magic != 2681 and m_magic != 68217 and m_magic != 2147486329:
+			print("No pak header detected!", m_magic)
+			return 0
+
+		m_hdrSize = bs.readUInt()					#0x4 header size
+		m_pakLoginTableIdx = bs.readUInt()			#0x8 idx of the page storing the PakLoginTable
+		m_pakLoginTableOffset = bs.readUInt()		#0xC relative offset PakLoginTable = PakPageHeader + m_pakLoginTableOffset; //its a ResItem
+		m_pageCt = bs.readUInt()					#0x10 page count. Total number of pages in the package
+		m_pPakPageEntryTable = bs.readUInt()		#0x14 ptr to the PakPageEntry array/table
+		m_numPointerFixUpPages = bs.readUInt()		#0x18 always 0x8
+		m_pointerFixUpTableOffset = bs.readUInt()	#0x1C ptr to the PointerFixUpTable table
+		m_unk5 = bs.readUInt()						#0x20 no idea
+		m_unk6 = bs.readUInt()						#0x20 no idea
+		m_unk7 = bs.readUInt()						#0x20 no idea
+		
+		self.pakPageEntries = []
+		for i in range(m_pageCt):
+			self.pakPageEntries.append((bs.readUInt(), bs.readUInt(), bs.readUInt()))
+		
+		bs.seek(m_pointerFixUpTableOffset)
+		m_pageEntryNumber = bs.readUInt()
+		m_dataOffset = bs.readUInt()
+		m_numLoginPageEntries = bs.readUInt()
+		bs.seek(m_dataOffset)
+		
+		self.pointerPageIds = {}
+		for i in range(m_numLoginPageEntries):
+			m_page1Idx = bs.readUShort()
+			m_page2Idx = bs.readUShort()
+			pointerOffs = bs.readUInt()
+			self.pointerPageIds[pointerOffs + self.pakPageEntries[m_page1Idx][0]] = m_page2Idx
+			
+		self.jointOffset = self.geoOffset = None
+		
+		self.vramDicts = None
+		self.vrams = {}
+		
+		file = open(noesis.getPluginsPath() + "python\\U4TextureHashes.json")
+		try:
+			self.texDict = json.load(file) if file else {}
+		except:
+			print("Failed to load json", noesis.getPluginsPath() + "python\\U4TextureDicts.json")
+		
+		for p, pageEntry in enumerate(self.pakPageEntries):
+			
+			start = pageEntry[0]
+			bs = self.bs
+			bs.seek(start + 12)
+			m_pageSize = bs.readUInt()
+			bs.seek(2,1)
+			m_numPageHeaderEntries = bs.readUShort()
+			
+			for ph in range(m_numPageHeaderEntries):
+				m_name = readStringAt(bs, bs.readUInt64()+start)
+				m_resItemOffset = bs.readUInt()
+				place = bs.tell() + 4
+				bs.seek(m_resItemOffset + start)
+				m_itemNameOffset = bs.readUInt64()
+				m_itemName = readStringAt(bs, m_itemNameOffset+start)
+				m_itemTypeOffset = bs.readUInt64()
+				m_itemType = readStringAt(bs, m_itemTypeOffset+start)
+				
+				self.entriesList.append(PakEntry(type=m_itemType, offset = m_resItemOffset))
+				
+				if m_itemType == "VRAM_DESC":
+					bs.seek(m_resItemOffset + start + 56)
+					texHash = bs.readUInt64()
+					texPath = readStringAt(bs, m_resItemOffset + start + 112)
+					texName = rapi.getLocalFileName(texPath[:texPath.find(".tga")+4]).replace(".ndb", "").replace(".tga", ".dds")
+					self.vrams[texHash] = (m_resItemOffset + start, texName)
+					
+					if getattr(self, "vramDicts") and texHash not in self.vramDicts[key]:
+						self.vramDicts[key][texHash] = m_resItemOffset + start + self.startAddr
+						bs.seek(m_resItemOffset + start)
+				
+				if m_itemType == "JOINT_HIERARCHY":
+					self.jointOffset = (m_resItemOffset, start)
+					
+				if m_itemType == "GEOMETRY_1":
+					self.geoOffset = (m_resItemOffset, start)
+					
+				bs.seek(place)
+		self.readPakHeader = True
+	
+	def readPak(self):
+		
+		global dialogOptions
+		bs = self.bs
+		readPointerFixup = self.readPointerFixup
+		
+		if len(self.pakPageEntries) == 0:
+			self.readPakHeader()
+		start = self.pakPageEntries[0]
+		
+		if not self.jointOffset and dialogOptions.doLoadBase and dialogOptions.baseSkeleton: # and dialogOptions.baseIdx != -1:
+			baseSkelPath = dialogOptions.baseSkeleton = BaseDirectory + dialogOptions.baseSkeleton
+			dialogOptions.baseSkeleton = ""
+			self.loadBaseSkeleton(baseSkelPath)
+		
+		if self.jointOffset:
+			start = self.jointOffset[1]
+			print("Found Joint Hierarchy offset", self.jointOffset[0] + start, ", location:", self.jointOffset[0] + start + 20 + 32)
+			bs.seek(self.jointOffset[0] + start + 20 + 32)
+			boneCount = bs.readUInt()
+			bs.seek(8,1)
+			xformsOffset = readPointerFixup()
+			flagsOffset = bs.readUInt64()
+			uknOffset = bs.readUInt64()
+			namesOffset = readPointerFixup()
+			
+			bs.seek(xformsOffset + 16)
+			nodeCount = bs.readUShort()
+			xformCount = bs.readUShort()
+			uknCount = bs.readUShort()
+			uknShort = bs.readUShort()
+			uknHash0 = bs.readUInt()
+			uknHash1 = bs.readUInt()
+			headerSize = bs.readUInt()
+			uknInt0 = bs.readUInt()
+			uknInt1 = bs.readUInt()
+			aOffs = bs.readUInt()
+			bOffs = bs.readUInt()
+			cOffs = bs.readUInt()
+			uknInt2 = bs.readUInt()
+			hierarchyOffset = bs.readUInt()
+			
+			self.boneList = self.boneList or []
+			parentList = []
+			matrixList = []
+			
+			bs.seek(xformsOffset + headerSize)
+			for b in range(xformCount):
+				scale = NoeVec3((bs.readFloat(), bs.readFloat(), bs.readFloat()))
+				bs.seek(4,1)
+				rotation = NoeQuat((bs.readFloat(), bs.readFloat(), bs.readFloat(), bs.readFloat())).transpose()
+				position = NoeVec3((bs.readFloat(), bs.readFloat(), bs.readFloat()))
+				bs.seek(4,1)
+				mat = rotation.toMat43()
+				mat[3] = position * GlobalScale
+				matrixList.append(mat)
+				
+			bs.seek(xformsOffset + hierarchyOffset + 20)
+			hashesSize = bs.readUInt()
+			bs.seek(hashesSize - 24, 1)
+			for b in range(boneCount):
+				parentList.append((bs.readInt(), bs.readInt(), bs.readInt(), bs.readInt()))
+			
+			mainBones = []
+			mainBoneMats = []
+			boneNames = []
+			self.boneDict = []
+			self.boneMap = []
+			
+			bs.seek(namesOffset)
+			for b in range(boneCount):
+				bs.seek(8,1)
+				boneNames.append(readStringAt(bs, bs.readUInt64()+start))
+				
+			def getRootParent(parentTbl):
+				while parentTbl[1] != -1:
+					parentTbl = parentList[parentTbl[1]]
+				return parentList.index(parentTbl)
+			
+			for b in range(boneCount):	
+				self.boneMap.append(b)
+				if getRootParent(parentList[b]) == 0:
+					mainBones.append(b)
+				
+			identity = NoeMat43((NoeVec3((1.0, 0.0, 0.0)), NoeVec3((0.0, 1.0, 0.0)), NoeVec3((0.0, 0.0, 1.0)), NoeVec3((0.0, 0.0, 0.0))))
+			startBoneIdx = len(self.boneList)
+			for b, bID in enumerate(mainBones):
+				mat = matrixList[b] if b < len(matrixList) else identity
+				mainBoneMats.append(mat)
+			
+			for b in range(boneCount):
+				if b in mainBones:
+					self.boneList.append(NoeBone(startBoneIdx + b, boneNames[b], mainBoneMats[mainBones.index(b)], None, parentList[b][1]))
+				else:
+					splitted = boneNames[b].split("_")
+					matchedName = boneNames[b].replace("_"+splitted[len(splitted)-1], "")
+					bFound = False
+					for j, bId in enumerate(mainBones):
+						if boneNames[bId].find(matchedName) != -1:
+							self.boneList.append(NoeBone(startBoneIdx + b, boneNames[b], identity, None, parentList[b][1]))
+							bFound = True
+							if parentList[b][1] == -1:
+								self.boneList[len(self.boneList)-1].parentIndex = bId
+							break
+					if not bFound:
+						self.boneList.append(NoeBone(startBoneIdx + b, boneNames[b], identity, None, parentList[b][1]))
+				if self.boneList[len(self.boneList)-1].parentIndex != -1:
+					self.boneList[len(self.boneList)-1].parentIndex += startBoneIdx
+				elif b not in mainBones:
+					self.boneList[len(self.boneList)-1].parentIndex = 0 #parent stragglers to root
+				
+			#rapi.rpgSetBoneMap(self.boneMap)
+			
+		if self.geoOffset:
+			start = self.geoOffset[1]
+			print("Found Geometry offset", self.geoOffset[0] + start)
+			
+			lastLOD = 0
+			self.submeshes = []
+			
+			bs.seek(self.geoOffset[0] + start + 32)
+			
+			m_version = bs.readUInt()
+			m_isForeground = bs.readUInt()
+			m_numSubMeshDesc = bs.readUInt()
+			m_numLODs = bs.readUInt()
+			m_numMaterials = bs.readUInt()
+			m_unk4 = bs.readUInt()
+			m_numShaders = bs.readUInt()
+			m_unk6 = bs.readUInt()
+			m_unk7 = bs.readUInt()
+			m_unk8 = bs.readUInt()
+			SubmeshesOffs = readPointerFixup()
+			MatHdrsOffs = bs.readUInt64()
+			ukn0 = bs.readUInt64()
+			ukn1 = bs.readUInt64()
+			ukn2 = bs.readUInt64()
+			ukn3 = bs.readUInt64()
+			uknFloatsOffs = bs.readUInt64()
+			ukn4 = bs.readUInt64()
+			
+			bs.seek(SubmeshesOffs)
+			
+			usedMaterials = {}
+			
+			for i in range(m_numSubMeshDesc):
+			
+				field_0 = bs.readUInt()
+				field_4 = bs.readUInt()
+				m_nameOffset = readPointerFixup()
+				field_10 = bs.readUInt()
+				field_14 = bs.readUInt()
+				field_18 = bs.readUInt()
+				field_1C = bs.readUInt()
+				field_20 = bs.readUInt()
+				m_numVertexes = bs.readUInt()
+				m_numIndexes = bs.readUInt()
+				m_numStreamSource = bs.readUInt()
+				m_numDefaultStreams = bs.readInt()
+				field_34 = bs.readUInt()
+				m_pStreamDesc = readPointerFixup()
+				field_40 = bs.readUInt()
+				field_44 = bs.readUInt()
+				m_pIndexes = readPointerFixup()
+				m_material = readPointerFixup()
+				m_numMaterialInstances = bs.readUInt()
+				field_5C = bs.readUInt()
+				field_60 = bs.readUInt()
+				field_64 = bs.readUInt()
+				skindataOffset = readPointerFixup()
+				field_70 = bs.readUInt()
+				field_74 = bs.readUInt()
+				field_78 = bs.readUInt()
+				field_7C = bs.readUInt()
+				field_80 = bs.readUInt()
+				field_84 = bs.readUInt()
+				nrmRecalcDescOffs = readPointerFixup()
+				field_90 = bs.readUInt()
+				field_94 = bs.readUInt()
+				field_98 = bs.readUInt()
+				field_9C = bs.readUInt()
+				field_A0 = bs.readUInt()
+				field_A4 = bs.readUInt()
+				field_A8 = bs.readUInt()
+				field_AC = bs.readUInt()
+				
+				place = bs.tell()
+				submeshName = readStringAt(bs, m_nameOffset).split("|")
+				submeshName = submeshName[len(submeshName)-1]
+				streamDescs = []
+				
+				for j in range(m_numStreamSource):
+					
+					bs.seek(m_pStreamDesc + 24*j)
+					m_numAttributes = bs.readUByte()
+					m_unk  = bs.readUByte()
+					m_stride  = bs.readUShort()
+					m_unk2 = bs.readUByte()
+					m_unk3 = bs.readUByte()
+					m_unk4 = bs.readUShort()
+					m_compInfoOffs = readPointerFixup()
+					m_bufferOffset = readPointerFixup()
+					
+					bs.seek(m_compInfoOffs)
+					
+					m_unkC0 = bs.readUByte()
+					m_unkC1 = bs.readUByte()
+					m_unkC2 = bs.readUByte()
+					m_compType = bs.readUByte()
+					
+					streamDescs.append(StreamDesc(type=m_compType, offset=m_bufferOffset, stride=m_stride))
+				
+				self.submeshes.append(PakSubmesh(submeshName, m_numVertexes, m_numIndexes, m_pIndexes, streamDescs))
+				
+				if nrmRecalcDescOffs:
+					bs.seek(nrmRecalcDescOffs)
+					indexCount = bs.readInt()
+					uknInt2 = bs.readInt()
+					ptr1 = readPointerFixup()
+					ptr2 = readPointerFixup()
+					ptr3 = readPointerFixup()
+					ptr4 = readPointerFixup()
+					
+					self.submeshes[i].nrmRecalcDesc = [ptr1, ptr2, ptr3, ptr4, indexCount]
+				
+				if skindataOffset:
+					bs.seek(skindataOffset)
+					uknSD0 = bs.readUInt()
+					uknSD1 = bs.readUInt()
+					uknSD2 = bs.readUInt()
+					uknSD3 = bs.readUInt()
+					bIndicesOffs = readPointerFixup()
+					weightsOffs = readPointerFixup()
+					
+					self.submeshes[i].skinDesc = SkinDesc(mapOffset=bIndicesOffs, weightsOffset=weightsOffs)
+				
+				if True: #submeshName.find("lod[1234]") == -1:
+				
+					bs.seek(m_material)
+					shaderAssetNameOffs = readPointerFixup()
+					shaderTypeOffs = readPointerFixup()
+					shaderOptions0Offs = readPointerFixup()
+					hashCodeOffs = readPointerFixup()
+					shaderOptions1Offs = readPointerFixup()
+					texDescsListOffs = readPointerFixup()
+					shaderOptions3Offs = readPointerFixup()
+					
+					nameCount = bs.readUInt()
+					paramCount = bs.readUInt()
+					texCount = bs.readUInt()
+					unkCount = bs.readUInt()
+					
+					matName = readStringAt(bs, shaderAssetNameOffs)
+					matType = readStringAt(bs, shaderTypeOffs)
+					matKey = rapi.getLocalFileName(matName[:matName.find(":")])
+					material = usedMaterials.get(m_material) 
+					
+					if not material:
+						material = NoeMaterial(matKey, "")
+						materialFlags = 0
+						loadedDiffuse = loadedNormal = loadedTrans = False
+						
+						for j in range(texCount):
+							bs.seek(texDescsListOffs + 40*j)
+							nameAddr = readPointerFixup()
+							name = readStringAt(bs, nameAddr)
+							bs.seek(8,1) #path = readStringAt(bs, readPointerFixup())
+							bs.seek(readPointerFixup())
+							path = readStringAt(bs, readPointerFixup())
+							vramHash = bs.readUInt64()
+							
+							#texFileName = rapi.getLocalFileName(path[:path.find(".tga")+4]).replace(".tga", "_" + path[path.find(".tga")+5:] + ".tga")
+							texFileName = rapi.getLocalFileName(path[:path.find(".tga")+4]).replace(".tga", ".dds")
+							alreadyLoaded = (texFileName in [tex.name for tex in self.texList])
+							tex = doSet = None
+							
+							if not loadedDiffuse and name.find("BaseColor") != -1:
+								doSet = loadedDiffuse =  True 
+								material.setTexture(texFileName)
+								#material.setSpecularTexture(texFileName)
+								#materialFlags |=   noesis.NMATFLAG_PBR_SPEC
+								
+							elif not loadedNormal and name.find("NR") != -1:
+								doSet = loadedNormal = True
+								material.setNormalTexture(texFileName)
+								materialFlags |=   noesis.NMATFLAG_NORMALMAP_FLIPY #| noesis.NMATFLAG_NORMALMAP_NODERZ
+								
+							elif not loadedTrans and name.find("Transp") != -1:
+								doSet = loadedTrans = True
+								material.setOpacityTexture(texFileName)
+								material.setAlphaTest(0.05)
+								
+								if not loadedDiffuse:
+									material.setTexture(texFileName)
+								if not loadedNormal:
+									material.setNormalTexture(material.texName) #alpha wont work without a diffuse and normal map
+									
+							doSet = doSet or dialogOptions.loadAllTextures
+							
+							if doSet and not alreadyLoaded:
+								self.vramHashes.append(vramHash)
+									
+						material.setMetal(1.0, 1.0)
+						material.setRoughness(1.0, 1.0)
+						material.setFlags(materialFlags)
+						usedMaterials[m_material] = material
+						self.matList.append(material)
+						
+					self.matNames.append(material.name)
+				
+				bs.seek(place)
+				
+
+			
+	def loadGeometry(self):
+		
+		bs = self.bs
+		rapi.rpgSetTransform((NoeVec3((GlobalScale,0,0)), NoeVec3((0,GlobalScale,0)), NoeVec3((0,0,GlobalScale)), NoeVec3((0,0,0)))) 
+		
+		if self.submeshes:
+			
+			lastLOD = 0
+			
+			if dialogOptions.doLoadTex:
+				for vramHash in self.vramHashes:
+					tex = self.loadVRAM(self.vrams[vramHash][0])
+					if tex:  
+						self.texList.append(tex)
+			
+			for i, sm in enumerate(self.submeshes):
+				lodFind = sm.name.find("Shape")
+				LODidx = int(sm.name[lodFind+5]) if lodFind != -1 and sm.name[lodFind+5].isnumeric() else 0
+				if LODidx > lastLOD:
+					lastLOD = LODidx
+				if not dialogOptions.doLODs and LODidx > 0:
+					continue
+				
+				rapi.rpgSetName(sm.name)
+				rapi.rpgSetMaterial(self.matNames[i])
+				bFoundPositions = bFoundUVs = bFoundNormals = 0
+				
+				for j, sd in enumerate(sm.streamDescs):
+				
+					bs.seek(sd.offset)
+					
+					#Positions
+					if j == 0:
+						bFoundPositions = True
+						rapi.rpgBindPositionBufferOfs(bs.readBytes(sd.stride * sm.numVerts), noesis.RPGEODATA_FLOAT if sd.stride==12 else noesis.RPGEODATA_HALFFLOAT, sd.stride, 0)
+					
+					#UVs
+					elif sd.type == 34: 
+						
+						if not bFoundUVs:
+							bFoundUVs = 1
+							rapi.rpgBindUV1Buffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4)
+						elif bFoundUVs == 1:
+							bFoundUVs = 2
+							rapi.rpgBindUV2Buffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4)
+						else:
+							bFoundUVs += 1
+							print("Would read UV", bFoundUVs, "from", bs.tell(), "to", bs.tell()+4 * sm.numVerts)
+							#rapi.rpgBindUVXBuffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4, 0, bFoundUVs, sm.numVerts)
+							
+
+					#Normals/Tangents
+					elif sd.type == 31 and bFoundNormals != 2:
+						if not bFoundNormals:
+							bFoundNormals = 1
+							rapi.rpgBindNormalBufferOfs(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_BYTE, 4, 0)
+						else:
+							bFoundNormals = 2
+							rapi.rpgBindTangentBufferOfs(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_BYTE, 4, 0)
+					else:
+						print("Omitting vertex component type", sd.type, "found at", bs.tell())
+				
+				if self.boneList and sm.skinDesc:
+					bs.seek(sm.skinDesc.mapOffset)
+					vertWeightOffsets = []
+					for b in range(sm.numVerts):
+						vertWeightOffsets.append((bs.readUInt(), bs.readUInt()))
+					idsList = []
+					weightList = []
+					for v, offsetsCounts in enumerate(vertWeightOffsets):
+						bs.seek(sm.skinDesc.weightsOffset + offsetsCounts[1])
+						tupleList = []
+						for w in range(8):
+							if w >= offsetsCounts[0]:
+								weightList.append(0)
+								idsList.append(0)
+							else:
+								weightList.append(bs.readBits(22))
+								idsList.append(bs.readBits(10))
+					rapi.rpgBindBoneIndexBufferOfs(struct.pack("<" + 'H'*len(idsList), *idsList), noesis.RPGEODATA_USHORT, 16, 0, 8)
+					rapi.rpgBindBoneWeightBufferOfs(struct.pack("<" + 'I'*len(weightList), *weightList), noesis.RPGEODATA_UINT, 32, 0, 8)
+				
+				try:
+					if bFoundPositions:
+						bs.seek(sm.facesOffset)
+						rapi.rpgCommitTriangles(bs.readBytes(2 * sm.numIndices), noesis.RPGEODATA_USHORT, sm.numIndices, noesis.RPGEO_TRIANGLE, 0x1)
+					else:
+						print("No positions found for submesh", i)
+				except:
+					print("Failed to bind submesh", i)
+				
+				rapi.rpgClearBufferBinds()
+				
+			print("\n====================================\n\"" + rapi.getLocalFileName(self.path or rapi.getInputName()) + "\" Textures list:")
+			for hash, subTuple in self.vrams.items():
+				if subTuple[1]:
+					print("    " + subTuple[1].replace(".tga", ".dds") + "  --  " + dxFormat.get(readUIntAt(bs, subTuple[0]+72)))
+			print("")
+			
+		else:
+			print("Geometry data not found!")
+			
+		return 1
+		
+
+def pakLoadRGBA(data, texList):
+	
+	pak = PakFile(NoeBitStream(data), {'path':rapi.getInputName(), 'texList':texList})
+	pak.readPak()
+	return 1
+
+def pakLoadModel(data, mdlList):
+	
+	global dialogOptions
+	
+	noesis.logPopup()
+	print("\n\n	Naughty Dog PAK model import", Version, "by alphaZomega\n")
+	
+	noDialog = noesis.optWasInvoked("-nodialog") or NoDialog
+	pak = PakFile(NoeBitStream(data), {'path':rapi.getInputName()})
+	ctx = rapi.rpgCreateContext()
+	
+	if not noDialog:
+		pak.readPakHeader()
+		dialog = openOptionsDialogWindow(None, None, {"pak":pak})
+		dialog.createPakWindow()
+		pak.readPak()
+		
+	
+	if not noDialog and dialog.isCancelled:
+		mdlList.append(NoeModel())
+	else:
+		pak.loadGeometry()
+		
+		if noDialog:
+			if pak.submeshes[0].skinDesc and not pak.boneList and dialogOptions.doLoadBase:
+				guessedName = pak.path.replace(".pak", ".skel.pak")
+				for key, value in baseSkeletons.items():
+					if pak.path.find(key) != -1:
+						guessedName = BaseDirectory + value
+						break
+				skelPath = guessedName
+				
+				while skelPath and not rapi.checkFileExists(skelPath):
+					skelPath = noesis.userPrompt(noesis.NOEUSERVAL_FILEPATH, "Skeleton Not Found", "Input the path to the .pak containing this model's skeleton", guessedName, None) 
+				if skelPath and rapi.checkFileExists(skelPath):
+					skelPak = PakFile(NoeBitStream(rapi.loadIntoByteArray(skelPath)), {'path':skelPath})
+					skelself.readPak()
+					pak.boneList = skelself.boneList
+					pak.boneMap = skelself.boneMap
+					pak.boneDict = skelself.boneDict
+				else:
+					print("Failed to load Skeleton")
+		else:
+			for otherPath in dialog.loadItems:
+				fullOtherPath = dialog.baseDir + otherPath
+				if fullOtherPath != dialog.myPath:
+					otherPak = PakFile(NoeBitStream(rapi.loadIntoByteArray(fullOtherPath)), {'path':fullOtherPath})
+					otherPak.texList = pak.texList
+					otherPak.matList = pak.matList
+					otherPak.boneList = pak.boneList
+					otherPak.doLODs = pak.doLODs
+					otherPak.readPak()
+					otherPak.loadGeometry()
+		try:
+			mdl = rapi.rpgConstructModelAndSort()
+		except:
+			print ("Failed to construct model")
+			mdl = NoeModel()
+			
+		if pak.texList:
+			mdl.setModelMaterials(NoeModelMaterials(pak.texList, pak.matList))
+		
+		mdlList.append(mdl)
+		
+		if pak.boneList:
+			pak.boneList = rapi.multiplyBones(pak.boneList)
+			for mdl in mdlList:
+				mdl.setBones(pak.boneList)
+		
+	return 1
+
+def pakWriteModel(mdl, bs):
+	
+	global pointerPageIds, pakPageEntries 
+	
+	noesis.logPopup()
+	print("\n\n	Naughty Dog PAK model export", Version, "by alphaZomega\n")
+	
+	def getExportName(fileName):		
+		if fileName == None:
+			expOverMeshName = re.sub(r'out\w+\.', '.', rapi.getOutputName().lower()).replace("fbx",".").replace("out.pak",".pak")
+		else:
+			expOverMeshName = fileName
+		expOverMeshName = noesis.userPrompt(noesis.NOEUSERVAL_FILEPATH, "Export .pak", "Choose a .pak file to inject", expOverMeshName, None)
+		
+		if expOverMeshName == None:
+			print("Aborting...")
+			return
+		return expOverMeshName
+	
+	fileName = None
+	if noesis.optWasInvoked("-meshfile"):
+		expOverMeshName = noesis.optGetArg("-meshfile")
+	else:
+		expOverMeshName = getExportName(fileName)
+		
+	if expOverMeshName == None:
+		return 0
+	while not (rapi.checkFileExists(expOverMeshName)):
+		print ("File not found!")
+		expOverMeshName = getExportName(fileName)	
+		fileName = expOverMeshName
+		if expOverMeshName == None:
+			return 0
+			
+	srcMesh = rapi.loadIntoByteArray(expOverMeshName)
+	
+	f = NoeBitStream(srcMesh)
+	magic = readUIntAt(f, 0) 
+	if magic != 2681 and magic != 68217 and magic != 2147486329:
+		print("Not a .pak file.\nAborting...")
+		return 0
+	
+	#copy file:
+	bs.writeBytes(f.readBytes(f.getSize()))
+	
+	source = PakFile(f)
+	for hint, fileName in baseSkeletons.items():
+		if rapi.getOutputName().find(hint) != -1:
+			dialogOptions.baseSkeleton = fileName
+	source.readPak()
+	
+	boneDict = {}
+	for i, bone in enumerate(source.boneList or mdl.bones):
+		boneDict[bone.name] = i
+	
+	if source.submeshes:
+		
+		lastLOD = 0
+		f.seek(source.geoOffset[0] + source.geoOffset[1] + 72)
+		submeshesAddr = source.readPointerFixup()
+		didWrite = False
+		
+		for i, sm in enumerate(source.submeshes):
+			
+			writeMesh = None
+			for mesh in mdl.meshes:
+				if mesh.name == sm.name:
+					writeMesh = mesh; break
+			
+			if writeMesh:
+				
+				didWrite = True
+				
+				if len(writeMesh.positions) > sm.numVerts:
+					print("Cannot inject", sm.name, "\n	as it exceeds the maximum vertex count of", sm.numVerts, "(has", len(writeMesh.positions),")!")
+					return 0
+				if len(writeMesh.indices) > sm.numIndices:
+					print("Cannot inject", sm.name, "\n	as it exceeds the maximum index count of", sm.numIndices, "(has", len(writeMesh.indices),")!")
+					return 0
+				
+				vertOffs = submeshesAddr + 176*i + 36
+				bFoundPositions = bFoundUVs = bFoundNormals = False
+				
+				for j, sd in enumerate(sm.streamDescs):
+					
+					bs.seek(sd.offset)
+					
+					if ((j == 0 and sd.stride == 12 or sd.stride == 8) or sd.type == 10) and not bFoundPositions:
+						print(i, "Writing positions at", bs.tell())
+						bFoundPositions = True
+						if sd.stride == 12:
+							for v, vert in enumerate(writeMesh.positions):
+								bs.writeFloat(vert[0] * (1/GlobalScale))
+								bs.writeFloat(vert[1] * (1/GlobalScale))
+								bs.writeFloat(vert[2] * (1/GlobalScale))
+						elif sd.stride == 8:
+							for v, vert in enumerate(writeMesh.positions):
+								bs.writeHalfFloat(vert[0] * (1/GlobalScale))
+								bs.writeHalfFloat(vert[1] * (1/GlobalScale))
+								bs.writeHalfFloat(vert[2] * (1/GlobalScale))
+								bs.writeHalfFloat(0)
+								
+					elif sd.type == 34 and bFoundUVs != 2: 
+						if not bFoundUVs:
+							print(i, "Writing UV1 at", bs.tell())
+							bFoundUVs = 1
+							for v, vert in enumerate(writeMesh.uvs):
+								bs.writeHalfFloat(vert[0])
+								bs.writeHalfFloat(vert[1])
+						else:
+							print(i, "Writing UV2 at", bs.tell())
+							bFoundUVs = 2
+							for v, vert in enumerate(writeMesh.lmUVs):
+								bs.writeHalfFloat(vert[0])
+								bs.writeHalfFloat(vert[1])
+								
+					elif sd.type == 31 and bFoundNormals != 2:
+						if not bFoundNormals: #Normals
+							bFoundNormals = 1
+							print(i, "Writing Normals at", bs.tell())
+							for v, vert in enumerate(writeMesh.tangents): 
+								bs.writeByte(int(vert[0][0] * 127 + 0.5000000001)) #normal
+								bs.writeByte(int(vert[0][1] * 127 + 0.5000000001))
+								bs.writeByte(int(vert[0][2] * 127 + 0.5000000001))
+								bs.writeByte(0)
+						else:  #Tangents
+							bFoundNormals = 2
+							print(i, "Writing Tangents at", bs.tell())
+							for v, vert in enumerate(writeMesh.tangents):
+								bs.writeByte(int(vert[2][0] * 127 + 0.5000000001)) #bitangent
+								bs.writeByte(int(vert[2][1] * 127 + 0.5000000001))
+								bs.writeByte(int(vert[2][2] * 127 + 0.5000000001))
+								TNW = vert[0].cross(vert[1]).dot(vert[2])
+								if (TNW < 0.0):
+									bs.writeByte(129)
+								else:
+									bs.writeByte(127)
+					else:
+						if sd.type==10:
+							print(i, "Skipped extra positions buffer", sd.type, "found at", bs.tell())
+						elif sd.type==31:
+							print(i, "Skipped extra normals/tangents buffer", sd.type, "found at", bs.tell())
+						else:
+							print(i, "Skipped extra component type", sd.type, "found at", bs.tell())
+				
+				if sm.skinDesc:
+					
+					srcWeightCount = fbxWeightCount = 0
+					f.seek(sm.skinDesc.mapOffset)
+					for v in range(sm.numVerts):
+						srcWeightCount += f.readUInt()
+						f.seek(4,1)
+					for vertWeight in writeMesh.weights:
+						for w, weight in enumerate(vertWeight.weights):
+							if weight > 0: 
+								fbxWeightCount += 1
+					
+					if fbxWeightCount > srcWeightCount:
+						print("Cannot inject weights to", sm.name, "\n	as it exceeds the maximum weight count of", srcWeightCount, "(has", fbxWeightCount,")!")
+						return 0
+					else:
+						runningOffset = 0
+						for v, vertWeight in enumerate(writeMesh.weights):
+							bs.seek(sm.skinDesc.mapOffset + 8*v)
+							bs.writeUInt(len(vertWeight.weights))
+							bs.writeUInt(runningOffset)
+							bs.seek(sm.skinDesc.weightsOffset + runningOffset)
+							for w, weight in enumerate(vertWeight.weights):
+								boneID = boneDict[mdl.bones[vertWeight.indices[w]].name]
+								bs.writeUInt((boneID << 22) | int(weight * 4194303))
+								runningOffset += 4
+						
+				bs.seek(sm.facesOffset)
+				print(i, "Writing indices at", bs.tell())
+				for k, idx in enumerate(writeMesh.indices):
+					bs.writeUShort(idx)
+				
+				#Null out normals recalculation values:
+				if sm.nrmRecalcDesc:
+					bs.seek(sm.nrmRecalcDesc[1])
+					for k in range(sm.nrmRecalcDesc[4]):
+						bs.writeShort(0)
+					bs.seek(sm.nrmRecalcDesc[3])
+					for k in range(sm.nrmRecalcDesc[4]):
+						bs.writeShort(0)
+				
+				#set vertex/index counts:
+				bs.seek(vertOffs)
+				bs.writeUInt(len(writeMesh.positions))
+				bs.writeUInt(len(writeMesh.indices))
+		
+		#Set all LODs to read as LOD0:
+		if didWrite and not dialogOptions.doLODs:
+			f.seek(source.geoOffset[0] + source.geoOffset[1] + 44)
+			LODCount = f.readUInt()
+			f.seek(32, 1)
+			lodDescsOffset = source.readPointerFixup()
+			f.seek(lodDescsOffset)
+			lodDescs = []
+			for a in range(LODCount):
+				lodDescs.append(source.readPointerFixup())
+			firstLODSubmeshOffs = readUIntAt(f, lodDescs[0] + 24)
+			for a in range(1, LODCount):
+				bs.seek(lodDescs[a] + 24)
+				bs.writeUInt64(firstLODSubmeshOffs)
+		
+		#Embed image data
+		matNames = [mat.name for mat in mdl.modelMats.matList]
+		path = rapi.getDirForFilePath(expOverMeshName)+rapi.getLocalFileName(expOverMeshName).split(".", 1)[0]
+		print("Checking for textures to embed in", path)
+		
+		if os.path.isdir(path):
+			source.bs = bs
+			vramPathDict = {}
+			for hash, vramTuple in source.vrams.items():
+				vramPathDict[vramTuple[1]] = (vramTuple[0], hash)
+				
+			for root, dirs, files in os.walk(path):
+				for fileName in files:
+					if fileName.find(".dds") != -1:
+						vramTuple = vramPathDict.get(fileName)
+						if vramTuple:
+							print("\nEmbedding texture", fileName, "at", vramTuple[0])
+							source.writeVRAMImage(vramTuple[0], os.path.join(root, fileName))
+							vramPathDict[fileName] = 0
+						elif vramTuple != 0:
+							print("Texture was found, but is not in the pak file!\n	", fileName)
+			
+	return 1
+	
