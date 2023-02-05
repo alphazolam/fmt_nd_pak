@@ -67,7 +67,7 @@ You can create a folder named after the file you are injecting and fill it with 
 
 For example, when injecting "nadine-island-body.pak", create a folder called "nadine-island-body" next to it and put "nadine_mad_pants-color.dds" encoded as BC1/DXT1 compression, and it will become the texture for Nadine's pants on the island. You can use Intel Texture Works plugin for Photoshop to encode your textures.
 
-![RaqModExample](https://i.imgur.com/Rng6tKG.png)
+![RaqModExample](https://i.imgur.com/ET7C3wm.png)
 
 ## NDP_NOESIS_CMD Maxscript
 This Maxscript tool lets you quickly mod pak files in 3dsmax through a GUI.
