@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Uncharted 4 ".pak" plugin for Rich Whitehouse's Noesis
 #Authors: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v0.1 (February 6, 2023)'
+Version = 'v0.11 (February 6, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -56,6 +56,7 @@ def registerNoesisTypes():
 	handle = noesis.register("Naughty Dog PAK", ".pak")
 	noesis.setTypeExportOptions(handle, "-noanims -notex")
 	noesis.addOption(handle, "-nodialog", "Do not display dialog window", 0)
+	noesis.addOption(handle, "-t", "Textures only; do not inject geometry data", 0)
 	noesis.addOption(handle, "-meshfile", "Export using a given source mesh filename", noesis.OPTFLAG_WANTARG)
 	noesis.setHandlerTypeCheck(handle, pakCheckType)
 	noesis.setHandlerLoadModel(handle, pakLoadModel)
@@ -1544,6 +1545,7 @@ def pakWriteModel(mdl, bs):
 	
 	noesis.logPopup()
 	print("\n\n	Naughty Dog PAK model export", Version, "by alphaZomega\n")
+	texOnly = noesis.optWasInvoked("-t")
 	
 	def getExportName(fileName):		
 		if fileName == None:
@@ -1607,7 +1609,7 @@ def pakWriteModel(mdl, bs):
 				if mesh.name == sm.name:
 					writeMesh = mesh; break
 			
-			if writeMesh:
+			if writeMesh and not texOnly:
 				
 				didWrite = True
 				
@@ -1748,26 +1750,27 @@ def pakWriteModel(mdl, bs):
 				bs.writeUInt64(firstLODSubmeshOffs)
 		
 		#Embed image data
-		matNames = [mat.name for mat in mdl.modelMats.matList]
-		path = rapi.getDirForFilePath(expOverMeshName)+rapi.getLocalFileName(expOverMeshName).split(".", 1)[0]
-		print("Checking for textures to embed in", path)
-		
-		if os.path.isdir(path):
-			source.bs = bs
-			vramPathDict = {}
-			for hash, vramTuple in source.vrams.items():
-				vramPathDict[vramTuple[1]] = (vramTuple[0], hash)
-				
-			for root, dirs, files in os.walk(path):
-				for fileName in files:
-					if fileName.find(".dds") != -1:
-						vramTuple = vramPathDict.get(fileName)
-						if vramTuple:
-							print("\nEmbedding texture", fileName, "at", vramTuple[0])
-							source.writeVRAMImage(vramTuple[0], os.path.join(root, fileName))
-							vramPathDict[fileName] = 0
-						elif vramTuple != 0:
-							print("Texture was found, but is not in the pak file!\n	", fileName)
+		if mdl.modelMats:
+			matNames = [mat.name for mat in mdl.modelMats.matList]
+			path = rapi.getDirForFilePath(expOverMeshName)+rapi.getLocalFileName(expOverMeshName).split(".", 1)[0]
+			print("Checking for textures to embed in", path)
 			
+			if os.path.isdir(path):
+				source.bs = bs
+				vramPathDict = {}
+				for hash, vramTuple in source.vrams.items():
+					vramPathDict[vramTuple[1]] = (vramTuple[0], hash)
+					
+				for root, dirs, files in os.walk(path):
+					for fileName in files:
+						if fileName.find(".dds") != -1:
+							vramTuple = vramPathDict.get(fileName)
+							if vramTuple:
+								print("\nEmbedding texture", fileName, "at", vramTuple[0])
+								source.writeVRAMImage(vramTuple[0], os.path.join(root, fileName))
+								vramPathDict[fileName] = 0
+							elif vramTuple != 0:
+								print("Texture was found, but is not in the pak file!\n	", fileName)
+				
 	return 1
 	
