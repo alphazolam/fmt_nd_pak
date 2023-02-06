@@ -58,19 +58,22 @@ The resulting file will be injected with the new geometry and should work, but m
 - Attempting to inject a model where any of the submeshes have more polygons, more vertices or more bone weights than the original will fail, as the injector does not attempt to create new space for that.
 - It is best to keep an original copy of the mesh you are injecting and inject that copy every time. Avoid injecting an already-injected file
 
-
 #### SUBMESHES IN YOUR FBX MUST HAVE THE SAME NAMES AS SUBMESHES FROM THE ORIGINAL PAK TO BE INJECTED, otherwise they will be ignored.
 
+![RaqModExample](https://i.imgur.com/ET7C3wm.png)
 
 ## Texture Modding
 When loading any pak model, its list of used textures will appear in the debug log.
 You can create a folder named after the file you are injecting and fill it with properly-encoded DDS files with the same filenames as from this list, and the plugin will grab those textures and embed them into the PAK.
 
+#### Use the '-t' Advanced option to inject only textures, ignoring the mesh
+
+![-t-option](https://i.imgur.com/0CEvcyC.png)
+
 For example, when injecting "nadine-island-body.pak", create a folder called "nadine-island-body" next to it and put "nadine_mad_pants-color.dds" encoded as BC1/DXT1 compression, and it will become the texture for Nadine's pants on the island. You can use Intel Texture Works plugin for Photoshop to encode your textures.
 Even if you are not modding the mesh and only want to change textures, you still need to use an FBX to inject them.
 Check the Noesis debug log when exporting for the text "Checking for textures in \[path]" to see exactly where you need to put your dds files.
 
-![RaqModExample](https://i.imgur.com/ET7C3wm.png)
 
 ## NDP_NOESIS_CMD Maxscript
 This Maxscript tool lets you quickly mod pak files in 3dsmax through a GUI.
