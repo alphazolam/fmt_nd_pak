@@ -1,6 +1,6 @@
 --Naughty Dog PAK Noesis CMD tool
---Version: v0.1
---Last Release: February 3 2023
+--Version: v0.2
+--Last Release: February 5 2023
 --Created by: alphaZomega 
 
 global noesis_path = "C:\\Program Files\\Noesis\\Noesis.exe"
@@ -39,7 +39,7 @@ fn selectSkeleton node = (
 )
 
 try(destroydialog formNoesisCMD; clearlistener())catch()
-rollout formNoesisCMD "Noesis PAK v0.1" (
+rollout formNoesisCMD "Noesis PAK v0.2" (
 	group "Import" (
 		button btn_import "Import To Scene" align:#center
 		checkbox chk_legacyFBX "Use Legacy FBX" checked:false align:#left tooltip:"Import as FBX 2014"

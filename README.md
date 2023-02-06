@@ -5,18 +5,17 @@ by alphaZomega
 
 ![plugin](https://i.imgur.com/oAzAv5A.png)
 
-This plugin previews Uncharted 4 models from their pak files and can fetch textures for them as well.
+This plugin previews Uncharted 4 and The Lost Legacy models from their pak files and can fetch textures for them as well.
 It can also create modified pak files for use in modding the game.
 Support for games beyond Uncharted 4 is also possible in the future.
 
 
 ## Installation
-1. Download and install Noesis from here:
-https://richwhitehouse.com/index.php?content=inc_projects.php&showproject=91
+1. Download and install [Noesis](https://richwhitehouse.com/index.php?content=inc_projects.php&showproject=91)
 
-2. Place 'fmt_nd_pak.py' and 'U4TextureHashes.json' into your Noesis\Plugins\Python\ folder
+2. Place 'fmt_nd_pak.py', 'U4TextureHashes.json' and 'TLLTextureHashes.json' into your Noesis\Plugins\Python\ folder
 
-3. (Optional) Edit 'fmt_nd_pak.py' to point to the location of your extracted game files (directory containing 'Actor77', 'texturedict2' etc folders). Make sure the path has double slashes ("\\"s instead of "\"s)
+3. (Optional) Edit 'fmt_nd_pak.py' to point to the location of your extracted game files (directory containing 'Actor77', 'texturedict2' etc folders). Make sure the path has double slashes ("\\\\"s instead of "\\\"s)
 
 4. (Optional) Place NDP_NOESIS_CMD.ms into your 3dsmax Scripts folder or a place where you keep your Maxscripts
 
@@ -24,11 +23,9 @@ https://richwhitehouse.com/index.php?content=inc_projects.php&showproject=91
 
 
 ## Extaction / File Modding
-Use U4.PSARC.Tool to extract your PSARC files and get the pak files that make up everything in the game.
+Use [U4.PSARC.Tool](https://github.com/Ekey/U4.PSARC.Tool) by Ekey to extract your PSARC files and get the pak files that make up everything in the game.
 Rename your original PSARC so that the game does not see it and it will resort to loading its assets from your extracted folder of that PSARC instead, if it is in the same folder.
 
-U4.PSARC.Tool by Ekey:
-https://github.com/Ekey/U4.PSARC.Tool
 
 
 ## Usage
@@ -46,17 +43,21 @@ You can load multiple files at once using the plugin's GUI window, and select th
 
 #### GUI OPTIONS:
 
-- Load Textures: 	  Load textures onto the model
-- Load Base (Skeleton):	  Attempt to load a base skeleton for every rigged model missing bones
-- Import LODs:		  Load lower detail LODs onto the model. Lower detail LODs will be disabled on exported paks with this option enabled
-- Convert Textures	  Convert normal maps to put normal X in the red channel and normal Y in the green channel (standard format)
-
+- Load Textures: 	  	Load textures onto the model
+- Load Base (Skeleton):	Attempt to load a base skeleton for every rigged model missing bones
+- Import LODs:		  	Load lower detail LODs onto the model. Lower detail LODs will be disabled on exported paks with this option enabled
+- Convert Textures:	  	Convert normal maps to put normal X in the red channel and normal Y in the green channel (standard format)
+- Load All Textures:	Allows you to extract every texture in a pak, rather than just diffuse, transparency and normal maps
+- Game :				This menu lets you pick between using HD textures/skeletons from Uncharted 4 or The Lost Legacy, along with setting which one's Base Directory is used	
+- View: 				This menu lets you pick between viewing files / folders from the directory of the opened file or from the extracted Base Directory of your selected Game
 
 ## Injecting
 Once you have edited a model in your 3D program, you can inject it back into a copy of the same pak file it came from using Noesis 'File -> Export -> .pak - Naughty Dog PAK'
 The resulting file will be injected with the new geometry and should work, but many cases have not been tested yet.
 
-Attempting to inject a model where any of the submeshes have more polygons, more vertices or more bone weights than the original will fail, as the injector does not attempt to create new space for that.
+- Attempting to inject a model where any of the submeshes have more polygons, more vertices or more bone weights than the original will fail, as the injector does not attempt to create new space for that.
+- It is best to keep an original copy of the mesh you are injecting and inject that copy every time. Avoid injecting an already-injected file
+
 
 #### SUBMESHES IN YOUR FBX MUST HAVE THE SAME NAMES AS SUBMESHES FROM THE ORIGINAL PAK TO BE INJECTED, otherwise they will be ignored.
 
@@ -66,6 +67,8 @@ When loading any pak model, its list of used textures will appear in the debug l
 You can create a folder named after the file you are injecting and fill it with properly-encoded DDS files with the same filenames as from this list, and the plugin will grab those textures and embed them into the PAK.
 
 For example, when injecting "nadine-island-body.pak", create a folder called "nadine-island-body" next to it and put "nadine_mad_pants-color.dds" encoded as BC1/DXT1 compression, and it will become the texture for Nadine's pants on the island. You can use Intel Texture Works plugin for Photoshop to encode your textures.
+Even if you are not modding the mesh and only want to change textures, you still need to use an FBX to inject them.
+Check the Noesis debug log when exporting for the text "Checking for textures in \[path]" to see exactly where you need to put your dds files.
 
 ![RaqModExample](https://i.imgur.com/ET7C3wm.png)
 
@@ -82,8 +85,10 @@ If you rename your original pak (to be injected) from say 'hero-island.pak' to '
 
 
 ## SUPPORT 
-For support, join our Uncharted Modding discord at 
+Use my [nd_pak.bt](https://github.com/alphazolam/nd_pak.bt) binary template to learn more about pak files and edit things like material parameters
+
+
+For more support, join our Uncharted Modding discord at 
 
 https://discord.gg/APQr5GgUeC
-
 

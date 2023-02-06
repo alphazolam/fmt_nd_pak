@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Uncharted 4 ".pak" plugin for Rich Whitehouse's Noesis
 #Authors: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v0.03 (February 5, 2023)'
+Version = 'v0.1 (February 6, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -14,10 +14,14 @@ LoadTextures = False											# Load textures onto the model
 ConvertTextures = True											# Convert normal maps to put normal X in the red channel and normal Y in the green channel (standard format)
 FlipUVs = False													# Flip UVs and flip texture images rightside-up (NOT IMPLEMENTED)
 LoadAllTextures = False											# Load all textures onto a model, rather than only color and normal maps
+ExportCopyUV3 = False											# Copy UV1 with '1' or UV2 with '2' to UV3+ when exporting, if 'NullUV3' is disabled
+NullUV3 = True													# Make all UVs in UV channels 3+ be at tex coordinates [0,0]
 
 # Set the base path from which the plugin will search for pak files and textures:
-BaseDirectory = "F:\\ExtractedGameFiles\\Uncharted4\\"			
-
+BaseDirectories = {
+	"TLL": "C:\Program Files (x86)\\Steam\steamapps\\common\\Uncharted Legacy of Thieves Collection\\Uncharted4_data\\build\\pc\\thelostlegacy\\",
+	"U4": "F:\\ExtractedGameFiles\\Uncharted4\\",
+}
 
 from inc_noesis import *
 from collections import namedtuple
@@ -27,6 +31,8 @@ import os
 import re
 import random
 
+gameName = "U4"
+
 class DialogOptions:
 	def __init__(self):
 		self.doLoadTex = LoadTextures
@@ -35,9 +41,13 @@ class DialogOptions:
 		self.doFlipUVs = FlipUVs
 		self.doLODs = LoadAllLODs
 		self.loadAllTextures = LoadAllTextures
+		self.nullUV3 = NullUV3
+		self.exportCopyUV3 = ExportCopyUV3
 		self.baseSkeleton = None
 		self.width = 600
 		self.height = 800
+		self.gameName = gameName
+
 		dialog = None
 
 dialogOptions = DialogOptions()
@@ -110,84 +120,166 @@ def encodeImageData(data, width, height, fmt):
 		
 	return outputData.getBuffer(), mipCount
 
-skelFiles = [
-	"actor77\\adventurer-base.pak",
-	"actor77\\alcazar-base.pak",
-	"actor77\\auctioneer-f-base.pak",
-	"actor77\\avery-base.pak",
-	"actor77\\avery-guard-base.pak",
-	"actor77\\cassie-base.pak",
-	"actor77\\col-tower-sect-1-base.pak",
-	"actor77\\crash-base.pak",
-	"actor77\\elena-base.pak",
-	"actor77\\gustavo-base.pak",
-	"actor77\\jameson-base.pak",
-	"actor77\\lemur-base.pak",
-	"actor77\\light-base.pak",
-	"actor77\\man-false-journals-base.pak",
-	"actor77\\man-letters-base.pak",
-	"actor77\\man-letters-pictures-base.pak",
-	"actor77\\manager-base.pak",
-	"actor77\\monica-base.pak",
-	"actor77\\nadine-base.pak",
-	"actor77\\note-fold-6x9-portrait-base.pak",
-	"actor77\\note-fold-standard-portrait-base.pak",
-	"actor77\\npc-medium-base.pak",
-	"actor77\\npc-normal-base.pak",
-	"actor77\\npc-normal-crowd-base.pak",
-	"actor77\\npc-normal-crowd-fem-base.pak",
-	"actor77\\npc-normal-fem-base.pak",
-	"actor77\\pistol-base.pak",
-	"actor77\\prison-drake-base.pak",
-	"actor77\\rafe-base.pak",
-	"actor77\\rifle-base.pak",
-	"actor77\\samuel-base.pak",
-	"actor77\\sco-bucket-base.pak",
-	"actor77\\sco-map-room-second-corner-pillar-base.pak",
-	"actor77\\sco-map-room-start-corner-pillar-base.pak",
-	"actor77\\sco-map-room-third-corner-pillar-base.pak",
-	"actor77\\smokey-base.pak",
-	"actor77\\sullivan-base.pak",
-	"actor77\\tew-base.pak",
-	"actor77\\throwable-base.pak",
-	"actor77\\vargas-base.pak",
-	"actor77\\young-drake-base.pak",
-	"actor77\\young-samuel-base.pak",
-]
+fullGameNames = ["Uncharted 4", "The Lost Legacy"]
+gamesList = [ "U4", "TLL"]
+
+skelFiles = {
+	"U4": [
+		"actor77\\adventurer-base.pak",
+		"actor77\\alcazar-base.pak",
+		"actor77\\auctioneer-f-base.pak",
+		"actor77\\avery-base.pak",
+		"actor77\\avery-guard-base.pak",
+		"actor77\\cassie-base.pak",
+		"actor77\\col-tower-sect-1-base.pak",
+		"actor77\\crash-base.pak",
+		"actor77\\elena-base.pak",
+		"actor77\\gustavo-base.pak",
+		"actor77\\jameson-base.pak",
+		"actor77\\lemur-base.pak",
+		"actor77\\light-base.pak",
+		"actor77\\man-false-journals-base.pak",
+		"actor77\\man-letters-base.pak",
+		"actor77\\man-letters-pictures-base.pak",
+		"actor77\\manager-base.pak",
+		"actor77\\monica-base.pak",
+		"actor77\\nadine-base.pak",
+		"actor77\\note-fold-6x9-portrait-base.pak",
+		"actor77\\note-fold-standard-portrait-base.pak",
+		"actor77\\npc-medium-base.pak",
+		"actor77\\npc-normal-base.pak",
+		"actor77\\npc-normal-crowd-base.pak",
+		"actor77\\npc-normal-crowd-fem-base.pak",
+		"actor77\\npc-normal-fem-base.pak",
+		"actor77\\pistol-base.pak",
+		"actor77\\prison-drake-base.pak",
+		"actor77\\rafe-base.pak",
+		"actor77\\rifle-base.pak",
+		"actor77\\samuel-base.pak",
+		"actor77\\sco-bucket-base.pak",
+		"actor77\\sco-map-room-second-corner-pillar-base.pak",
+		"actor77\\sco-map-room-start-corner-pillar-base.pak",
+		"actor77\\sco-map-room-third-corner-pillar-base.pak",
+		"actor77\\smokey-base.pak",
+		"actor77\\sullivan-base.pak",
+		"actor77\\tew-base.pak",
+		"actor77\\throwable-base.pak",
+		"actor77\\vargas-base.pak",
+		"actor77\\young-drake-base.pak",
+		"actor77\\young-samuel-base.pak",
+	],
+	"TLL": [
+		"actor77\\asav-base.pak",
+		"actor77\\chloe-base.pak",
+		"actor77\\elena-base.pak",
+		"actor77\\horse-base.pak",
+		"actor77\\light-base.pak",
+		"actor77\\meenu-base.pak",
+		"actor77\\monkey-base.pak",
+		"actor77\\nadine-base.pak",
+		"actor77\\nadine-dlc-base.pak",
+		"actor77\\nilay-base.pak",
+		"actor77\\note-fold-6x9-portrait-base.pak",
+		"actor77\\note-fold-standard-portrait-base.pak",
+		"actor77\\npc-kid-base.pak",
+		"actor77\\npc-kid-fem-base.pak",
+		"actor77\\npc-medium-base.pak",
+		"actor77\\npc-normal-base.pak",
+		"actor77\\npc-normal-crowd-base.pak",
+		"actor77\\npc-normal-crowd-fem-base.pak",
+		"actor77\\npc-normal-fem-base.pak",
+		"actor77\\orca-base.pak",
+		"actor77\\pistol-base.pak",
+		"actor77\\prison-drake-base.pak",
+		"actor77\\proto.pak",
+		"actor77\\rifle-base.pak",
+		"actor77\\rur-combat-column-e-base-a.pak",
+		"actor77\\rur-combat-column-f-base-a.pak",
+		"actor77\\rur-hub-coin-base.pak",
+		"actor77\\rur-hub-forest-rotation-puzzle-base.pak",
+		"actor77\\rur-hub-mid-ruins-base-a-broken-corner-a.pak",
+		"actor77\\rur-ruling-kings-trinkets-base.pak",
+		"actor77\\rur-shiva-puzzle-light-push-stone-base.pak",
+		"actor77\\samuel-base.pak",
+		"actor77\\samuel-dlc-base.pak",
+		"actor77\\sandy-base.pak",
+		"actor77\\smokey-base.pak",
+		"actor77\\sri-basement-debris-shift-pile-a.pak",
+		"actor77\\sullivan-base.pak",
+		"actor77\\throwable-base.pak",
+		"actor77\\train-car-box-car-base.pak",
+		"actor77\\train-locomotive-base.pak",
+		"actor77\\vin-base.pak",
+		"actor77\\waz-base.pak",
+	]
+}
 
 baseSkeletons = {
-	"adventurer": "actor77\\adventurer-base.pak",
-	"alcazar": "actor77\\alcazar-base.pak",
-	"auctioneer": "actor77\\auctioneer-f-base.pak",
-	"avery": "actor77\\avery-base.pak",
-	"avery-guard": "actor77\\avery-guard-base.pak",
-	"bucket": "actor77\\sco-bucket-base.pak",
-	"cassie": "actor77\\cassie-base.pak",
-	"crash": "actor77\\crash-base.pak",
-	"elena": "actor77\\elena-base.pak",
-	"fem": "actor77\\npc-normal-fem-base.pak",
-	"Gun": "actor77\\pistol-base.pak",
-	"gustavo": "actor77\\gustavo-base.pak",
-	"hero": "actor77\\prison-drake-base.pak",
-	"jameson": "actor77\\jameson-base.pak",
-	"lemur": "actor77\\lemur-base.pak",
-	"manager": "actor77\\manager-base.pak",
-	"meduim": "actor77\\npc-medium-base.pak",
-	"monica": "actor77\\monica-base.pak",
-	"nadine": "actor77\\nadine-base.pak",
-	"pistol": "actor77\\pistol-base.pak",
-	"rafe": "actor77\\rafe-base.pak",
-	"rifle": "actor77\\rifle-base.pak",
-	"samuel": "actor77\\samuel-base.pak",
-	"smokey": "actor77\\smokey-base.pak",
-	"smokey": "actor77\\smokey-base.pak",
-	"sull": "actor77\\sullivan-base.pak",
-	"tew": "actor77\\tew-base.pak",
-	"throw": "actor77\\throwable-base.pak",
-	"vargas": "actor77\\vargas-base.pak",
-	"young-drake": "actor77\\young-drake-base.pak",
-	"young-drake": "actor77\\young-drake-base.pak",
-	"young-samuel": "actor77\\young-samuel-base.pak",
+	"U4": {
+		"adventurer": "actor77\\adventurer-base.pak",
+		"alcazar": "actor77\\alcazar-base.pak",
+		"auctioneer": "actor77\\auctioneer-f-base.pak",
+		"avery": "actor77\\avery-base.pak",
+		"avery-guard": "actor77\\avery-guard-base.pak",
+		"bucket": "actor77\\sco-bucket-base.pak",
+		"cassie": "actor77\\cassie-base.pak",
+		"crash": "actor77\\crash-base.pak",
+		"elena": "actor77\\elena-base.pak",
+		"fem": "actor77\\npc-normal-fem-base.pak",
+		"-gun": "actor77\\pistol-base.pak",
+		"gustavo": "actor77\\gustavo-base.pak",
+		"hero": "actor77\\proto.pak",
+		"prison-drake": "actor77\\prison-drake-base.pak",
+		"jameson": "actor77\\jameson-base.pak",
+		"lemur": "actor77\\lemur-base.pak",
+		"manager": "actor77\\manager-base.pak",
+		"medium": "actor77\\npc-medium-base.pak",
+		"monica": "actor77\\monica-base.pak",
+		"nadine": "actor77\\nadine-base.pak",
+		"pistol": "actor77\\pistol-base.pak",
+		"rafe": "actor77\\rafe-base.pak",
+		"rifle": "actor77\\rifle-base.pak",
+		"samuel": "actor77\\samuel-base.pak",
+		"smokey": "actor77\\smokey-base.pak",
+		"sull": "actor77\\sullivan-base.pak",
+		"tew": "actor77\\tew-base.pak",
+		"throw": "actor77\\throwable-base.pak",
+		"vargas": "actor77\\vargas-base.pak",
+		"young-drake": "actor77\\young-drake-base.pak",
+		"young-drake": "actor77\\young-drake-base.pak",
+		"young-samuel": "actor77\\young-samuel-base.pak",
+	},
+	"TLL": {
+		"asav": "actor77\asav-base.pak",
+		"chloe": "actor77\chloe-base.pak",
+		"elena": "actor77\elena-base.pak",
+		"horse": "actor77\horse-base.pak",
+		"light": "actor77\light-base.pak",
+		"meenu": "actor77\meenu-base.pak",
+		"monkey": "actor77\monkey-base.pak",
+		"nadine": "actor77\nadine-base.pak",
+		"nadine-dlc": "actor77\nadine-dlc-base.pak",
+		"nilay": "actor77\nilay-base.pak",
+		"kid": "actor77\npc-kid-base.pak",
+		"kid-fem": "actor77\npc-kid-fem-base.pak",
+		"medium": "actor77\npc-medium-base.pak",
+		"normal": "actor77\npc-normal-base.pak",
+		"crowd": "actor77\npc-normal-crowd-base.pak",
+		"crowd-fem": "actor77\npc-normal-crowd-fem-base.pak",
+		"fem": "actor77\npc-normal-fem-base.pak",
+		"orca": "actor77\orca-base.pak",
+		"pistol": "actor77\pistol-base.pak",
+		"prison": "actor77\prison-drake-base.pak",
+		"rifle": "actor77\rifle-base.pak",
+		"samuel": "actor77\samuel-base.pak",
+		"samuel-dlc": "actor77\samuel-dlc-base.pak",
+		"sandy": "actor77\sandy-base.pak",
+		"smokey": "actor77\smokey-base.pak",
+		"sull": "actor77\sullivan-base.pak",
+		"throw": "actor77\throwable-base.pak",
+		"vin": "actor77\vin-base.pak",
+		"waz": "actor77\waz-base.pak",
+	},
 }
 
 dxFormat = {
@@ -283,54 +375,89 @@ dxFormat = {
 }
 
 gdRawDataStarts = {
-	"global-dict.pak":  940048,
-	"global-dict-1.pak":  1083904,
-	"global-dict-2.pak":  959456,
-	"global-dict-3.pak":  1041088,
-	"global-dict-4.pak":  924576,
-	"global-dict-5.pak":  1013456,
-	"global-dict-6.pak":  781216,
-	"global-dict-7.pak":  740640,
-	"global-dict-8.pak":  853104,
-	"global-dict-9.pak":  551888,
-	"global-dict-10.pak":  301056,
-	"global-dict-11.pak":  923936,
-	"global-dict-12.pak":  850656,
-	"global-dict-13.pak":  839584,
-	"global-dict-14.pak":  229456,
-	"global-dict-15.pak":  227216,
-	"global-dict-16.pak":  277968,
-	"global-dict-17.pak":  192960,
-	"global-dict-18.pak":  448832,
-	"global-dict-19.pak":  506752,
-	"global-dict-20.pak":  391920,
+	"U4": {
+		"global-dict.pak":  940048,
+		"global-dict-1.pak":  1083904,
+		"global-dict-2.pak":  959456,
+		"global-dict-3.pak":  1041088,
+		"global-dict-4.pak":  924576,
+		"global-dict-5.pak":  1013456,
+		"global-dict-6.pak":  781216,
+		"global-dict-7.pak":  740640,
+		"global-dict-8.pak":  853104,
+		"global-dict-9.pak":  551888,
+		"global-dict-10.pak":  301056,
+		"global-dict-11.pak":  923936,
+		"global-dict-12.pak":  850656,
+		"global-dict-13.pak":  839584,
+		"global-dict-14.pak":  229456,
+		"global-dict-15.pak":  227216,
+		"global-dict-16.pak":  277968,
+		"global-dict-17.pak":  192960,
+		"global-dict-18.pak":  448832,
+		"global-dict-19.pak":  506752,
+		"global-dict-20.pak":  391920,
+	},
+	"TLL": {
+		"global-dict.pak": 1040608,
+		"global-dict-1.pak": 949568,
+		"global-dict-2.pak": 1081104,
+		"global-dict-3.pak": 574688,
+		"global-dict-4.pak": 748944,
+		"global-dict-5.pak": 546608,
+		"global-dict-6.pak": 1074032,
+		"global-dict-7.pak": 911984,
+		"global-dict-8.pak": 247632,
+		"global-dict-9.pak": 131072,
+		"global-dict-10.pak": 140048,
+		"global-dict-11.pak": 488656,
+		"global-dict-12.pak": 79440,
+	}
 }
 
 
-
+def findRootDir(path):
+	uncharted4Idx = path.find("\\uncharted4\\")
+	if uncharted4Idx != -1:
+		return path[:(uncharted4Idx + 12)]
+	lostLegacyIdx = path.find("\\thelostlegacy\\")
+	if lostLegacyIdx != -1:
+		return path[:(lostLegacyIdx + 15)]
+	return path
 
 class openOptionsDialogWindow:
 	
 	def __init__(self, width=dialogOptions.width, height=dialogOptions.height, args=[]):
-		global dialogOptions
+		global dialogOptions, gameName
+		
 		self.width = width
 		self.height = height
 		self.pak = args.get("pak") or None
-		self.myPath = rapi.getLocalFileName(self.pak.path or rapi.getInputName())
-		self.baseDir = rapi.getDirForFilePath(self.pak.path or rapi.getInputName())
-		self.allFiles = []
-		for item in os.listdir(self.baseDir):
-			if os.path.isfile(os.path.join(self.baseDir, item)) and item.find(".pak") != -1:
-				self.allFiles.append(item)
-		self.allFiles = sorted(self.allFiles)	
-		self.loadItems = [self.myPath]
-		self.pakIdx = self.allFiles.index(self.myPath)
-		self.baseIdx = -1
-		self.loadIdx = -1
-		self.currDirIdx = -1
-		self.isCancelled = False
-		dialogOptions.dialog = self
+		self.path = self.pak.path or rapi.getInputName()
+		self.name = rapi.getLocalFileName(self.path)
+		gameName = "TLL" if self.path.lower().find("\\thelostlegacy\\") != -1 else "U4"
 		
+		self.loadItems = [self.name]
+		self.localDir = rapi.getDirForFilePath(self.path)
+		self.localRoot = findRootDir(self.path)
+		self.baseDir = BaseDirectories[gameName]
+		self.allFiles = []
+		self.subDirs = []
+		self.pakIdx = 0
+		self.baseIdx = -1
+		self.loadIdx = 0
+		self.dirIdx = 0
+		self.gameIdx = 0
+		self.localIdx = 0
+		self.isCancelled = False
+		self.isStarted = False
+		self.firstBaseDir = ""
+		if os.path.isdir(self.baseDir):
+			for item in os.listdir(self.baseDir):
+				if os.path.isdir(os.path.join(self.baseDir, item)):
+					self.firstBaseDir = item
+					if item == "actor77": break
+		dialogOptions.dialog = self
 		
 	def setWidthAndHeight(self, width=dialogOptions.width, height=dialogOptions.width):
 		self.width = width or self.width
@@ -345,68 +472,83 @@ class openOptionsDialogWindow:
 		self.noeWnd.closeWindow()
 		
 	def selectDirListItem(self, noeWnd, controlId, wParam, lParam):
-		if self.currDirIdx != self.dirList.getSelectionIndex():
-			self.currDirIdx = self.dirList.getSelectionIndex()
-			dialogOptions.currentDir = self.dirList.getStringForIndex(self.currDirIdx)
-			self.allFiles = []
-			self.baseDir = os.path.dirname(self.baseDir[:-1]) + "\\" + dialogOptions.currentDir
-			for item in os.listdir(self.baseDir):
-				if os.path.isfile(os.path.join(self.baseDir, item)) and item.find(".pak") != -1:
-					self.allFiles.append(item)
-			self.allFiles = sorted(self.allFiles)	
-			index = self.noeWnd.createListBox(5, 60, dialogOptions.width-20, 400, self.selectPakListItem, noewin.CBS_DROPDOWNLIST)
-			self.pakList = self.noeWnd.getControlByIndex(index)
-			self.setPakListBox()
-		
-	def setDirList(self, list_object=None, current_item=None):
-		path = self.pak.path or rapi.getInputName()
-		for folderName in os.listdir(self.baseDir+".."):
-			if os.path.isdir(os.path.join(self.baseDir+"..\\", folderName)):
-				self.dirList.addString(folderName)
-				if path.find(folderName) != -1:
-					self.dirList.selectString(folderName)
-					self.currDirIdx = self.dirList.getSelectionIndex()
-					dialogOptions.currentDir = folderName
-		
+		if self.dirList.getSelectionIndex() == -1:
+			self.dirList.selectString(self.subDirs[0])
+		if self.dirIdx != self.dirList.getSelectionIndex() and dialogOptions.currentDir != self.dirList.getStringForIndex(self.dirList.getSelectionIndex()):
+			print("changed selection", self.dirList.getSelectionIndex(), self.dirIdx, self.dirList.getStringForIndex(self.dirList.getSelectionIndex()), self.dirList.getStringForIndex(self.dirIdx),	dialogOptions.currentDir)
+			self.dirIdx = self.dirList.getSelectionIndex()
+			dialogOptions.currentDir = self.dirList.getStringForIndex(self.dirIdx)
+			self.setDirList()
+			self.setPakList()
+	
 	def selectBaseListItem(self, noeWnd, controlId, wParam, lParam):
 		self.baseIdx = self.baseList.getSelectionIndex()
 		dialogOptions.baseSkeleton = self.baseList.getStringForIndex(self.baseIdx)
 		
-	def setBaseList(self, list_object=None, current_item=None):
-		for path in skelFiles:
-			self.baseList.addString(path)
-		for hint, fileName in baseSkeletons.items():
-			if self.myPath.find(hint) != -1:
-				self.baseList.selectString(fileName)
-				self.baseIdx = self.baseList.getSelectionIndex()
-				dialogOptions.baseSkeleton = fileName
-		
 	def selectPakListItem(self, noeWnd, controlId, wParam, lParam):
-		if self.pakIdx != self.pakList.getSelectionIndex() and self.pakIdx != -1 and self.pakList.getStringForIndex(self.pakList.getSelectionIndex()) not in self.loadItems:
+		print(self.pakIdx, self.pakList.getSelectionIndex(), self.pakList.getStringForIndex(self.pakList.getSelectionIndex()))
+		if self.pakIdx != self.pakList.getSelectionIndex() and self.pakList.getStringForIndex(self.pakList.getSelectionIndex()) not in self.loadItems: #and self.pakIdx != -1 
 			self.pakIdx = self.pakList.getSelectionIndex()
-			self.loadItems.append(self.pakList.getStringForIndex(self.pakIdx))
-			self.loadList.addString(self.pakList.getStringForIndex(self.pakIdx))
-			self.loadItems = sorted(self.loadItems)
-			#self.loadList.selectString(self.pakList.getStringForIndex(self.pakIdx))
-			#self.loadIdx = self.loadList.getSelectionIndex()
-		
-	def setPakListBox(self, list_object=None, current_item=None):
-		self.pakIdx = current_item or self.pakIdx
-		for path in self.allFiles:
-			self.pakList.addString(path)
-		self.pakList.selectString(self.allFiles[self.pakIdx])
+			item = self.pakList.getStringForIndex(self.pakIdx)
+			if item:
+				self.loadItems.append(item)
+				self.loadList.addString(self.pakList.getStringForIndex(self.pakIdx))
+				self.loadItems = sorted(self.loadItems)
+				#self.loadList.selectString(self.pakList.getStringForIndex(self.pakIdx))
+				#self.loadIdx = self.loadList.getSelectionIndex()
+		self.pakIdx = self.pakList.getSelectionIndex()
 	
 	def selectLoadListItem(self, noeWnd, controlId, wParam, lParam):
 		self.loadIdx = self.loadList.getSelectionIndex()
-		if self.loadIdx != -1 and self.loadIdx < len(self.loadItems) and self.loadItems[self.loadIdx] != self.myPath:
+		if self.loadIdx != -1 and self.loadIdx < len(self.loadItems) and self.loadItems[self.loadIdx] != self.name:
 			self.loadList.removeString(self.loadItems[self.loadIdx])
 			del self.loadItems[self.loadIdx]
 			self.loadIdx = self.loadIdx if self.loadIdx < len(self.loadItems) else self.loadIdx - 1
 			self.loadList.selectString(self.loadItems[self.loadIdx])
+	
+	def selectGameBoxItem(self, noeWnd, controlId, wParam, lParam):
+		global gameName
+		if self.gameIdx != self.gameBox.getSelectionIndex():
+			self.gameIdx = self.gameBox.getSelectionIndex()
+			gameName = gamesList[self.gameIdx]
+			if self.localBox.getStringForIndex(self.localIdx) == "Base Directory":
+				self.baseDir = BaseDirectories[gameName]
+				self.firstBaseDir = ""
+				if os.path.isdir(self.baseDir):
+					for item in os.listdir(self.baseDir):
+						if os.path.isdir(os.path.join(self.baseDir, item)):
+							self.firstBaseDir = item
+							if item == "actor77": break
+				self.setDirList()
+				self.setPakList()
+				self.setLoadList()
+				
+	def selectLocalBoxItem(self, noeWnd, controlId, wParam, lParam):
+		if self.localIdx != self.localBox.getSelectionIndex():
+			self.localIdx = self.localBox.getSelectionIndex()
+			self.setDirList()
+			self.setPakList()
 			
-	def setLoadListBox(self, list_object=None, current_item=None):
-		self.loadList.addString(self.loadItems[0])
-		self.loadList.selectString(self.pak.path or rapi.getInputName())
+	def setBaseList(self, list_object=None, current_item=None):
+		for path in skelFiles[gameName]:
+			self.baseList.addString(path)
+		for hint, fileName in baseSkeletons[gameName].items():
+			if self.name.find(hint) != -1:
+				self.baseList.selectString(fileName)
+				self.baseIdx = self.baseList.getSelectionIndex()
+				dialogOptions.baseSkeleton = fileName	
+		
+	def setGameBox(self, list_object=None, current_item=None):
+		for i, name in enumerate(fullGameNames):
+			self.gameBox.addString(name)
+		self.gameBox.selectString(fullGameNames[gamesList.index(gameName)])
+		self.gameIdx = self.gameBox.getSelectionIndex()
+		
+	def setLocalBox(self, list_object=None, current_item=None):
+		for name in ["Local Folder", "Base Directory"]:
+			self.localBox.addString(name)
+		self.localBox.selectString("Local Folder")
+		self.localIdx = self.localBox.getSelectionIndex()
 	
 	def checkLoadTexCheckbox(self, noeWnd, controlId, wParam, lParam):
 		dialogOptions.doLoadTex = not dialogOptions.doLoadTex
@@ -432,71 +574,143 @@ class openOptionsDialogWindow:
 		dialogOptions.loadAllTextures = not dialogOptions.loadAllTextures
 		self.loadAllTexCheckbox.setChecked(dialogOptions.loadAllTextures)
 		
+	def setLoadList(self):
+		for item in self.loadItems:
+			self.loadList.removeString(item)
+		self.loadItems = [self.name]
+		self.loadList.addString(self.loadItems[0])
+		self.loadList.selectString(self.pak.path or rapi.getInputName())
+		
+	def setPakList(self):
+		dirName = self.localDir if self.localIdx == 0 else self.baseDir + (dialogOptions.currentDir or self.firstBaseDir)
+		if os.path.isdir(dirName):
+			for name in self.allFiles:
+				self.pakList.removeString(name)
+			self.allFiles = []
+			for item in os.listdir(dirName):
+				if os.path.isfile(os.path.join(dirName, item)) and item.find(".pak") != -1:
+					self.allFiles.append(item)
+					self.pakList.addString(item)
+			self.allFiles = sorted(self.allFiles)	
+			if self.name in self.allFiles:
+				self.pakIdx = self.allFiles.index(self.name)
+				self.pakList.selectString(self.name)
+		
+	def setDirList(self):
+		dirName = self.localRoot if self.localIdx == 0 else self.baseDir
+		parentFolder = os.path.dirname(dirName)
+		for name in self.subDirs:
+			self.dirList.removeString(name)
+		self.subDirs = []
+		for folderName in os.listdir(parentFolder):
+			if os.path.isdir(os.path.join(parentFolder, folderName)):
+				self.subDirs.append(folderName)
+				self.dirList.addString(folderName)
+		#self.subDirs = sorted(self.subDirs) #wtf why does THIS one not need to be sorted?
+		for folderName in self.subDirs:
+			if not self.isStarted and self.localIdx == 0 and self.localDir.find(folderName) != -1:
+				self.dirList.selectString(folderName)
+				self.dirIdx = self.dirList.getSelectionIndex()
+				dialogOptions.currentDir = folderName	
+				break
+		if self.localIdx == 1:
+			self.dirList.selectString(self.subDirs[self.dirIdx])
+			dialogOptions.currentDir = self.subDirs[self.dirIdx]
+		else:
+			self.dirIdx = self.dirList.getSelectionIndex()
+			if self.dirIdx == -1:
+				self.dirIdx = 0
+				self.dirList.selectString(0)
+			dialogOptions.currentDir = self.dirList.getStringForIndex(self.dirIdx)
+		
+		
 	def create(self, width=dialogOptions.width, height=dialogOptions.height):
-		self.noeWnd = noewin.NoeUserWindow("Naughty Dog .pak Tool:        " + rapi.getLocalFileName(self.myPath), "HTRAWWindowClass", width, height) 
+		self.noeWnd = noewin.NoeUserWindow("Naughty Dog .pak Tool:        " + rapi.getLocalFileName(self.name), "HTRAWWindowClass", width, height) 
 		noeWindowRect = noewin.getNoesisWindowRect()
 		if noeWindowRect:
 			windowMargin = 100
 			self.noeWnd.x = noeWindowRect[0] + windowMargin
 			self.noeWnd.y = noeWindowRect[1] + windowMargin  
 		return self.noeWnd.createWindow()
-			
+		
 	def createPakWindow(self, width=dialogOptions.width, height=dialogOptions.height):
 		
 		if self.create(width, height):
-			
 			self.noeWnd.setFont("Futura", 14)
-			self.noeWnd.createStatic("Base:", 10, 5, width-20, 20)
 			
-			index = self.noeWnd.createComboBox(50, 5, width-65, 20, self.selectBaseListItem, noewin.CBS_DROPDOWNLIST)
+			self.noeWnd.createStatic("Base:", 10, 5, width-20, 20)
+			index = self.noeWnd.createComboBox(50, 5, width-65, 20, self.selectBaseListItem, noewin.CBS_DROPDOWNLIST) #CB
 			self.baseList = self.noeWnd.getControlByIndex(index)
-			self.setBaseList(self.baseList, baseSkeletons["hero"])
+			
 			
 			self.noeWnd.createStatic("Files from:", 5, 45, width-20, 20)
-			index = self.noeWnd.createComboBox(80, 40, width-95, 20, self.selectDirListItem, noewin.CBS_DROPDOWNLIST)
+			index = self.noeWnd.createComboBox(80, 40, width-95, 20, self.selectDirListItem, noewin.CBS_DROPDOWNLIST) #CB
 			self.dirList = self.noeWnd.getControlByIndex(index)
-			self.setDirList(self.dirList)
 			
-			index = self.noeWnd.createListBox(5, 70, width-20, 400, self.selectPakListItem, noewin.CBS_DROPDOWNLIST)
+			
+			index = self.noeWnd.createListBox(5, 70, width-20, 400, self.selectPakListItem, noewin.CBS_DROPDOWNLIST) #LB
 			self.pakList = self.noeWnd.getControlByIndex(index)
-			self.setPakListBox()
 			
-			#self.noeWnd.createButton("Add", width - 200, 455, 80, 30, self.openOptionsButtonLoadEntry)
-			#self.noeWnd.createButton("Remove", width - 100, 455, 80, 30, self.openOptionsButtonCancel)
 			self.noeWnd.createStatic("Files to load:", 5, 485, width-20, 20)
-			
-			index = self.noeWnd.createListBox(5, 505, width-20, 150, self.selectLoadListItem, noewin.CBS_DROPDOWNLIST)
+			index = self.noeWnd.createListBox(5, 505, width-20, 150, self.selectLoadListItem, noewin.CBS_DROPDOWNLIST) #LB
 			self.loadList = self.noeWnd.getControlByIndex(index)
-			self.setLoadListBox()
+			self.setLoadList()
 			
-			index = self.noeWnd.createCheckBox("Load Textures", 10, 660, 130, 30, self.checkLoadTexCheckbox)
-			self.loadTexCheckbox = self.noeWnd.getControlByIndex(index)
-			self.loadTexCheckbox.setChecked(dialogOptions.doLoadTex)
+			if True:
+				index = self.noeWnd.createCheckBox("Load Textures", 10, 665, 130, 30, self.checkLoadTexCheckbox)
+				self.loadTexCheckbox = self.noeWnd.getControlByIndex(index)
+				self.loadTexCheckbox.setChecked(dialogOptions.doLoadTex)
+				
+				
+				index = self.noeWnd.createCheckBox("Load Base (Skeleton)", 140, 665, 160, 30, self.checkBaseCheckbox)
+				self.loadBaseCheckbox = self.noeWnd.getControlByIndex(index)
+				self.loadBaseCheckbox.setChecked(dialogOptions.doLoadBase)
+				
+				
+				index = self.noeWnd.createCheckBox("Convert Textures", 10, 695, 130, 30, self.checkConvTexCheckbox)
+				self.convTexCheckbox = self.noeWnd.getControlByIndex(index)
+				self.convTexCheckbox.setChecked(dialogOptions.doConvertTex)
+				
+				
+				#index = self.noeWnd.createCheckBox("Flip UVs", 140, 680, 130, 30, self.checkFlipUVsCheckbox)
+				#self.flipUVsCheckbox = self.noeWnd.getControlByIndex(index)
+				#self.flipUVsCheckbox.setChecked(dialogOptions.doFlipUVs)
+				
+				
+				index = self.noeWnd.createCheckBox("Load All Textures", 140, 695, 130, 30, self.checkLoadAllTexCheckbox)
+				self.loadAllTexCheckbox = self.noeWnd.getControlByIndex(index)
+				self.loadAllTexCheckbox.setChecked(dialogOptions.loadAllTextures)
+				
+				
+				index = self.noeWnd.createCheckBox("Import LODs", 280, 695, 100, 30, self.checkLODsCheckbox)
+				self.LODsCheckbox = self.noeWnd.getControlByIndex(index)
+				self.LODsCheckbox.setChecked(dialogOptions.doLODs)
+				
 			
-			index = self.noeWnd.createCheckBox("Load Base (Skeleton)", 140, 660, 160, 30, self.checkBaseCheckbox)
-			self.loadBaseCheckbox = self.noeWnd.getControlByIndex(index)
-			self.loadBaseCheckbox.setChecked(dialogOptions.doLoadBase)
+			self.noeWnd.createStatic("Game:", width-198, 670, 60, 20)
+			index = self.noeWnd.createComboBox(width-150, 665, 130, 20, self.selectGameBoxItem, noewin.CBS_DROPDOWNLIST) #CB
+			self.gameBox = self.noeWnd.getControlByIndex(index)
 			
-			index = self.noeWnd.createCheckBox("Import LODs", 320, 660, 160, 30, self.checkLODsCheckbox)
-			self.LODsCheckbox = self.noeWnd.getControlByIndex(index)
-			self.LODsCheckbox.setChecked(dialogOptions.doLODs)
 			
-			index = self.noeWnd.createCheckBox("Convert Textures", 10, 690, 130, 30, self.checkConvTexCheckbox)
-			self.convTexCheckbox = self.noeWnd.getControlByIndex(index)
-			self.convTexCheckbox.setChecked(dialogOptions.doConvertTex)
+			self.noeWnd.createStatic("View:", width-190, 700, 60, 20)
+			index = self.noeWnd.createComboBox(width-150, 695, 130, 20, self.selectLocalBoxItem, noewin.CBS_DROPDOWNLIST) #CB
+			self.localBox = self.noeWnd.getControlByIndex(index)
 			
-			#index = self.noeWnd.createCheckBox("Flip UVs", 140, 680, 130, 30, self.checkFlipUVsCheckbox)
-			#self.flipUVsCheckbox = self.noeWnd.getControlByIndex(index)
-			#self.flipUVsCheckbox.setChecked(dialogOptions.doFlipUVs)
 			
-			index = self.noeWnd.createCheckBox("Load All Textures", 140, 690, 130, 30, self.checkLoadAllTexCheckbox)
-			self.loadAllTexCheckbox = self.noeWnd.getControlByIndex(index)
-			self.loadAllTexCheckbox.setChecked(dialogOptions.loadAllTextures)
-
 			self.noeWnd.createButton("Load", 5, height-70, width-160, 30, self.openOptionsButtonLoadEntry)
 			self.noeWnd.createButton("Cancel", width-96, height-70, 80, 30, self.openOptionsButtonCancel)
+			
+			
+			self.setBaseList(self.baseList, baseSkeletons[gameName]["chloe" if gameName == "TLL" else "hero"])
+			self.setDirList()
+			self.setPakList()
+			self.setGameBox(self.gameBox)
+			self.setLocalBox(self.localBox)
+			self.isStarted = True
+			
 			self.noeWnd.doModal()
-
+			
+			
 StreamDesc = namedtuple("StreamDesc", "type offset stride")
 
 SkinDesc = namedtuple("SkinDesc", "mapOffset weightsOffset")
@@ -568,23 +782,22 @@ class PakFile:
 			jsons[fileName][hash] = subTuple[0]
 			
 	def dumpGlobalVramHashes(self):
-		file = open(noesis.getPluginsPath() + "python\\U4TextureHashes.json") or {}
+		file = open(noesis.getPluginsPath() + "python\\TLLTextureHashes.json") or {}
 		jsons = json.load(file) if file else {}
-		root = os.path.dirname(dialogOptions.dialog.baseDir[:-1])+"\\textureDict2\\"
+		root = os.path.dirname(dialogOptions.dialog.localDir[:-1])+"\\textureDict2\\"
+		
 		for fileName in os.listdir(root):
-			if fileName:
-				'''ds = NoeBitStream(rapi.loadIntoByteArray(root + fileName))
-				pageCt = readUIntAt(ds, 16)
-				ds.seek(readUIntAt(ds, 20)+12*(pageCt-1))
-				rawDataAddr = ds.readUInt() + ds.readUInt()
-				gdRawDataStarts[fileName] = rawDataAddr
-				print(fileName, "=", rawDataAddr )'''
-			'''if fileName.find("global-dict")  != -1 and fileName not in jsons:
+			if fileName.find("global-dict")  != -1 and fileName not in jsons:
 				dictPak = PakFile(NoeBitStream(rapi.loadIntoByteArray(root + fileName)), {"path": root + fileName})
+				pageCt = readUIntAt(dictPak.bs, 16)
+				dictPak.bs.seek(readUIntAt(dictPak.bs, 20)+12*(pageCt-1))
+				rawDataAddr = dictPak.bs.readUInt() + dictPak.bs.readUInt()
+				gdRawDataStarts[gameName][fileName] = rawDataAddr
+				print("\"" + fileName, ": " + str(rawDataAddr) + "," )
 				dictPak.readPak()
 				dictPak.makeVramHashJson(jsons)
-				with open(noesis.getPluginsPath() + "python\\U4TextureHashes.json", "w") as outfile:
-					json.dump(jsons, outfile)'''
+				with open(noesis.getPluginsPath() + "python\\TLLTextureHashes.json", "w") as outfile:
+					json.dump(jsons, outfile)
 	
 	def writeVRAMImage(self, vramOffset, filepath):
 		if rapi.checkFileExists(filepath):
@@ -594,8 +807,8 @@ class PakFile:
 			vramSize = readUIntAt(bs, vramOffset+48)
 			imgFormat = readUIntAt(bs, vramOffset+72)
 			fmtName = dxFormat.get(imgFormat) or ""
-			newDataOffset = bs.getSize()
 			rawDataStart = self.pakPageEntries[len(self.pakPageEntries)-1][0] + self.pakPageEntries[len(self.pakPageEntries)-1][1]
+			newDataOffset = offset + rawDataStart
 			
 			#fetch dds data
 			ds = NoeBitStream(rapi.loadIntoByteArray(filepath))
@@ -612,6 +825,10 @@ class PakFile:
 			
 			ds.seek(hdrSize+4)
 			imgBytes = ds.readBytes(ds.getSize() - ds.tell())
+			if len(imgBytes) > vramSize:
+				newDataOffset = bs.getSize()
+				bs.seek(32)
+				bs.writeUInt(readUIntAt(bs, bs.tell())+len(imgBytes)) #added size to raw_data
 			
 			bs.seek(vramOffset+40)
 			bs.writeUInt(newDataOffset - rawDataStart) #new offset
@@ -623,9 +840,6 @@ class PakFile:
 			bs.writeUInt(height) #new height
 			bs.seek(vramOffset+80)
 			bs.writeUInt(numMips) #new mips
-			
-			bs.seek(32)
-			bs.writeUInt(readUIntAt(bs, bs.tell())+len(imgBytes)) #added size to raw_data
 			
 			#replace hashes
 			bs.seek(vramOffset+56)
@@ -671,20 +885,20 @@ class PakFile:
 		texPath = readStringAt(bs, bs.tell()+12)
 		bigVramOffset = None
 		for fileName, subDict in self.texDict.items():
-			if rapi.checkFileExists(BaseDirectory + "texturedict2\\" + fileName):
+			if rapi.checkFileExists(BaseDirectories[gameName] + "texturedict2\\" + fileName):
 				bigVramOffset = subDict.get(str(m_hash))
 				if bigVramOffset: break
 				
 		if bigVramOffset: 
-			vramBytes = readFileBytes(BaseDirectory + "texturedict2\\" + fileName, bigVramOffset, 1024)
+			vramBytes = readFileBytes(BaseDirectories[gameName] + "texturedict2\\" + fileName, bigVramOffset, 1024)
 			vramStream = NoeBitStream(vramBytes)
 			offset = readUIntAt(vramStream, 40)
 			m_width = readUIntAt(vramStream, 84)
 			m_height = readUIntAt(vramStream, 88)
 			vramSize = readUIntAt(vramStream, 48)
 			imgFormat = readUIntAt(vramStream, 72)
-			print("VRAM texture hash found!", fileName, '{:02X}'.format(m_hash), texFileName) #offset + gdRawDataStarts[fileName], m_width, m_height, vramSize, imgFormat, "\n", texFileName)
-			imageData = readFileBytes(BaseDirectory + "texturedict2\\" + fileName, offset + gdRawDataStarts[fileName], vramSize)
+			print("VRAM texture hash found!", fileName, '{:02X}'.format(m_hash), texFileName) #offset + gdRawDataStarts[gameName][fileName], m_width, m_height, vramSize, imgFormat, "\n", texFileName)
+			imageData = readFileBytes(BaseDirectories[gameName] + "texturedict2\\" + fileName, offset + gdRawDataStarts[gameName][fileName], vramSize)
 		else:
 			print("Texture hash not found in json:", m_hash, "\n", texFileName)
 			bs.seek(pakOffset + self.pakPageEntries[len(self.pakPageEntries)-1][0] + self.pakPageEntries[len(self.pakPageEntries)-1][1])
@@ -710,7 +924,7 @@ class PakFile:
 		elif fmtName.find("Bc7") != -1: 
 			print("BC7")
 			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC7)
-			if dialogOptions.doConvertTex and texFileName.find("-ao") != -1:
+			if dialogOptions.doConvertTex and (texFileName.find("-ao") != -1 or texFileName.find("-occlusion") != -1):
 				texData = rapi.imageEncodeRaw(texData, m_width, m_height, "g16b16")
 				texData = rapi.imageDecodeRaw(texData, m_width, m_height, "r16g16")
 		elif re.search("[RGBA]\d\d?", fmtName):
@@ -774,11 +988,12 @@ class PakFile:
 		self.vramDicts = None
 		self.vrams = {}
 		
-		file = open(noesis.getPluginsPath() + "python\\U4TextureHashes.json")
+		jsonPath = noesis.getPluginsPath() + "python\\" + gameName + "TextureHashes.json"
+		file = open(jsonPath)
 		try:
 			self.texDict = json.load(file) if file else {}
 		except:
-			print("Failed to load json", noesis.getPluginsPath() + "python\\U4TextureDicts.json")
+			print("Failed to load json", jsonPath)
 		
 		for p, pageEntry in enumerate(self.pakPageEntries):
 			
@@ -832,7 +1047,7 @@ class PakFile:
 		start = self.pakPageEntries[0]
 		
 		if not self.jointOffset and dialogOptions.doLoadBase and dialogOptions.baseSkeleton: # and dialogOptions.baseIdx != -1:
-			baseSkelPath = dialogOptions.baseSkeleton = BaseDirectory + dialogOptions.baseSkeleton
+			baseSkelPath = dialogOptions.baseSkeleton = BaseDirectories[gameName] + dialogOptions.baseSkeleton
 			dialogOptions.baseSkeleton = ""
 			self.loadBaseSkeleton(baseSkelPath)
 		
@@ -920,17 +1135,20 @@ class PakFile:
 					bFound = False
 					for j, bId in enumerate(mainBones):
 						if boneNames[bId].find(matchedName) != -1:
-							self.boneList.append(NoeBone(startBoneIdx + b, boneNames[b], identity, None, parentList[b][1]))
 							bFound = True
+							self.boneList.append(NoeBone(startBoneIdx + b, boneNames[b], identity, None, parentList[b][1]))
 							if parentList[b][1] == -1:
 								self.boneList[len(self.boneList)-1].parentIndex = bId
 							break
 					if not bFound:
 						self.boneList.append(NoeBone(startBoneIdx + b, boneNames[b], identity, None, parentList[b][1]))
-				if self.boneList[len(self.boneList)-1].parentIndex != -1:
-					self.boneList[len(self.boneList)-1].parentIndex += startBoneIdx
+				lastBone = self.boneList[len(self.boneList)-1]
+				if lastBone.parentIndex != -1:
+					lastBone.parentIndex += startBoneIdx
 				elif b not in mainBones:
-					self.boneList[len(self.boneList)-1].parentIndex = 0 #parent stragglers to root
+					lastBone.parentIndex = 0 #parent stragglers to root
+				#print(lastBone.index, lastBone.name, lastBone.parentIndex, lastBone.parentName)
+				
 				
 			#rapi.rpgSetBoneMap(self.boneMap)
 			
@@ -1160,7 +1378,7 @@ class PakFile:
 				
 				rapi.rpgSetName(sm.name)
 				rapi.rpgSetMaterial(self.matNames[i])
-				bFoundPositions = bFoundUVs = bFoundNormals = 0
+				foundPositions = foundUVs = foundNormals = 0
 				
 				for j, sd in enumerate(sm.streamDescs):
 				
@@ -1168,31 +1386,31 @@ class PakFile:
 					
 					#Positions
 					if j == 0:
-						bFoundPositions = True
+						foundPositions = True
 						rapi.rpgBindPositionBufferOfs(bs.readBytes(sd.stride * sm.numVerts), noesis.RPGEODATA_FLOAT if sd.stride==12 else noesis.RPGEODATA_HALFFLOAT, sd.stride, 0)
 					
 					#UVs
 					elif sd.type == 34: 
 						
-						if not bFoundUVs:
-							bFoundUVs = 1
+						if not foundUVs:
+							foundUVs = 1
 							rapi.rpgBindUV1Buffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4)
-						elif bFoundUVs == 1:
-							bFoundUVs = 2
+						elif foundUVs == 1:
+							foundUVs = 2
 							rapi.rpgBindUV2Buffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4)
 						else:
-							bFoundUVs += 1
-							print("Would read UV", bFoundUVs, "from", bs.tell(), "to", bs.tell()+4 * sm.numVerts)
-							#rapi.rpgBindUVXBuffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4, 0, bFoundUVs, sm.numVerts)
+							foundUVs += 1
+							print("Would read UV", foundUVs, "from", bs.tell(), "to", bs.tell()+4 * sm.numVerts)
+							#rapi.rpgBindUVXBuffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4, 0, foundUVs, sm.numVerts)
 							
 
 					#Normals/Tangents
-					elif sd.type == 31 and bFoundNormals != 2:
-						if not bFoundNormals:
-							bFoundNormals = 1
+					elif sd.type == 31 and foundNormals != 2:
+						if not foundNormals:
+							foundNormals = 1
 							rapi.rpgBindNormalBufferOfs(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_BYTE, 4, 0)
 						else:
-							bFoundNormals = 2
+							foundNormals = 2
 							rapi.rpgBindTangentBufferOfs(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_BYTE, 4, 0)
 					else:
 						print("Omitting vertex component type", sd.type, "found at", bs.tell())
@@ -1218,7 +1436,7 @@ class PakFile:
 					rapi.rpgBindBoneWeightBufferOfs(struct.pack("<" + 'I'*len(weightList), *weightList), noesis.RPGEODATA_UINT, 32, 0, 8)
 				
 				try:
-					if bFoundPositions:
+					if foundPositions:
 						bs.seek(sm.facesOffset)
 						rapi.rpgCommitTriangles(bs.readBytes(2 * sm.numIndices), noesis.RPGEODATA_USHORT, sm.numIndices, noesis.RPGEO_TRIANGLE, 0x1)
 					else:
@@ -1272,9 +1490,9 @@ def pakLoadModel(data, mdlList):
 		if noDialog:
 			if pak.submeshes[0].skinDesc and not pak.boneList and dialogOptions.doLoadBase:
 				guessedName = pak.path.replace(".pak", ".skel.pak")
-				for key, value in baseSkeletons.items():
+				for key, value in baseSkeletons[gameName].items():
 					if pak.path.find(key) != -1:
-						guessedName = BaseDirectory + value
+						guessedName = BaseDirectories[gameName] + value
 						break
 				skelPath = guessedName
 				
@@ -1290,15 +1508,18 @@ def pakLoadModel(data, mdlList):
 					print("Failed to load Skeleton")
 		else:
 			for otherPath in dialog.loadItems:
-				fullOtherPath = dialog.baseDir + otherPath
-				if fullOtherPath != dialog.myPath:
-					otherPak = PakFile(NoeBitStream(rapi.loadIntoByteArray(fullOtherPath)), {'path':fullOtherPath})
-					otherPak.texList = pak.texList
-					otherPak.matList = pak.matList
-					otherPak.boneList = pak.boneList
-					otherPak.doLODs = pak.doLODs
-					otherPak.readPak()
-					otherPak.loadGeometry()
+				fullOtherPath = dialog.localDir + "\\" + otherPath
+				if rapi.getLocalFileName(fullOtherPath) != dialog.name: 
+					if not rapi.checkFileExists(fullOtherPath):
+						fullOtherPath = dialog.baseDir + dialogOptions.currentDir + "\\" + otherPath
+					if rapi.checkFileExists(fullOtherPath):
+						otherPak = PakFile(NoeBitStream(rapi.loadIntoByteArray(fullOtherPath)), {'path':fullOtherPath})
+						otherPak.texList = pak.texList
+						otherPak.matList = pak.matList
+						otherPak.boneList = pak.boneList
+						otherPak.doLODs = pak.doLODs
+						otherPak.readPak()
+						otherPak.loadGeometry()
 		try:
 			mdl = rapi.rpgConstructModelAndSort()
 		except:
@@ -1363,7 +1584,7 @@ def pakWriteModel(mdl, bs):
 	bs.writeBytes(f.readBytes(f.getSize()))
 	
 	source = PakFile(f)
-	for hint, fileName in baseSkeletons.items():
+	for hint, fileName in baseSkeletons[gameName].items():
 		if rapi.getOutputName().find(hint) != -1:
 			dialogOptions.baseSkeleton = fileName
 	source.readPak()
@@ -1398,13 +1619,13 @@ def pakWriteModel(mdl, bs):
 					return 0
 				
 				vertOffs = submeshesAddr + 176*i + 36
-				bFoundPositions = bFoundUVs = bFoundNormals = False
+				foundPositions = foundUVs = foundNormals = 0
 				
 				for j, sd in enumerate(sm.streamDescs):
 					
 					bs.seek(sd.offset)
 					
-					if ((j == 0 and sd.stride == 12 or sd.stride == 8) or sd.type == 10) and not bFoundPositions:
+					if ((j == 0 and sd.stride == 12 or sd.stride == 8) or sd.type == 10) and not foundPositions:
 						print(i, "Writing positions at", bs.tell())
 						bFoundPositions = True
 						if sd.stride == 12:
@@ -1419,31 +1640,31 @@ def pakWriteModel(mdl, bs):
 								bs.writeHalfFloat(vert[2] * (1/GlobalScale))
 								bs.writeHalfFloat(0)
 								
-					elif sd.type == 34 and bFoundUVs != 2: 
-						if not bFoundUVs:
-							print(i, "Writing UV1 at", bs.tell())
-							bFoundUVs = 1
-							for v, vert in enumerate(writeMesh.uvs):
-								bs.writeHalfFloat(vert[0])
-								bs.writeHalfFloat(vert[1])
+					elif sd.type == 34 and (foundUVs < 2 or (dialogOptions.exportCopyUV3 or dialogOptions.nullUV3)):
+						foundUVs += 1
+						UVs = writeMesh.lmUVs if dialogOptions.exportCopyUV3 == 2 or foundUVs == 2 else writeMesh.uvs
+						print(i, "Writing UV" + str(foundUVs) + " at", bs.tell())
+						if foundUVs > 2 and dialogOptions.nullUV3:
+							print("Nulling UVs...")
+							for v, vert in enumerate(UVs):
+								bs.writeHalfFloat(0)
+								bs.writeHalfFloat(0)
 						else:
-							print(i, "Writing UV2 at", bs.tell())
-							bFoundUVs = 2
-							for v, vert in enumerate(writeMesh.lmUVs):
+							for v, vert in enumerate(UVs):
 								bs.writeHalfFloat(vert[0])
 								bs.writeHalfFloat(vert[1])
 								
-					elif sd.type == 31 and bFoundNormals != 2:
-						if not bFoundNormals: #Normals
-							bFoundNormals = 1
+					elif sd.type == 31:
+						foundNormals += 1
+						if foundNormals == 1:
 							print(i, "Writing Normals at", bs.tell())
 							for v, vert in enumerate(writeMesh.tangents): 
 								bs.writeByte(int(vert[0][0] * 127 + 0.5000000001)) #normal
 								bs.writeByte(int(vert[0][1] * 127 + 0.5000000001))
 								bs.writeByte(int(vert[0][2] * 127 + 0.5000000001))
 								bs.writeByte(0)
-						else:  #Tangents
-							bFoundNormals = 2
+						elif foundNormals == 2: 
+							foundNormals = 2
 							print(i, "Writing Tangents at", bs.tell())
 							for v, vert in enumerate(writeMesh.tangents):
 								bs.writeByte(int(vert[2][0] * 127 + 0.5000000001)) #bitangent
@@ -1478,14 +1699,17 @@ def pakWriteModel(mdl, bs):
 						print("Cannot inject weights to", sm.name, "\n	as it exceeds the maximum weight count of", srcWeightCount, "(has", fbxWeightCount,")!")
 						return 0
 					else:
-						runningOffset = 0
+						runningOffset = boneID = 0
 						for v, vertWeight in enumerate(writeMesh.weights):
 							bs.seek(sm.skinDesc.mapOffset + 8*v)
 							bs.writeUInt(len(vertWeight.weights))
 							bs.writeUInt(runningOffset)
 							bs.seek(sm.skinDesc.weightsOffset + runningOffset)
 							for w, weight in enumerate(vertWeight.weights):
-								boneID = boneDict[mdl.bones[vertWeight.indices[w]].name]
+								try:
+									boneID = boneDict[mdl.bones[vertWeight.indices[w]].name]
+								except:
+									pass
 								bs.writeUInt((boneID << 22) | int(weight * 4194303))
 								runningOffset += 4
 						
