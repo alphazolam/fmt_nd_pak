@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Uncharted 4 ".pak" plugin for Rich Whitehouse's Noesis
 #Authors: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v0.12 (February 6, 2023)'
+Version = 'v0.2 (February 7, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -94,6 +94,12 @@ def readUIntAt(bs, offset):
 	output = bs.readUInt()
 	bs.seek(start)
 	return output 
+	
+def writeUIntAt(bs, offset, value):
+	start = bs.tell()
+	bs.seek(offset)
+	bs.writeUInt(value)
+	bs.seek(start)
 
 def readFileBytes(filepath, address, size):
 	with open(filepath, 'rb') as f:
@@ -668,7 +674,7 @@ class openOptionsDialogWindow:
 				self.loadBaseCheckbox.setChecked(dialogOptions.doLoadBase)
 				
 				
-				index = self.noeWnd.createCheckBox("Convert Textures", 10, 695, 130, 30, self.checkConvTexCheckbox)
+				index = self.noeWnd.createCheckBox("Convert Normal Maps", 10, 695, 130, 30, self.checkConvTexCheckbox)
 				self.convTexCheckbox = self.noeWnd.getControlByIndex(index)
 				self.convTexCheckbox.setChecked(dialogOptions.doConvertTex)
 				
@@ -712,14 +718,14 @@ class openOptionsDialogWindow:
 			self.noeWnd.doModal()
 			
 			
-StreamDesc = namedtuple("StreamDesc", "type offset stride")
+StreamDesc = namedtuple("StreamDesc", "type offset stride bufferOffsetAddr")
 
-SkinDesc = namedtuple("SkinDesc", "mapOffset weightsOffset")
+SkinDesc = namedtuple("SkinDesc", "mapOffset weightsOffset mapOffsetAddr weightOffsetAddr")
 
 PakEntry = namedtuple("PakEntry", "type offset")
 
 class PakSubmesh:
-	def __init__(self, name=None, numVerts=None, numIndices=None, facesOffset=None, streamDescs=None, skinDesc=None, nrmRecalcDesc=None):
+	def __init__(self, name=None, numVerts=None, numIndices=None, facesOffset=None, streamDescs=None, skinDesc=None, nrmRecalcDesc=None, facesOffsetAddr=None):
 		self.name = name
 		self.numVerts = numVerts
 		self.numIndices = numIndices
@@ -727,6 +733,7 @@ class PakSubmesh:
 		self.skinDesc = skinDesc
 		self.nrmRecalcDesc = nrmRecalcDesc
 		self.facesOffset = facesOffset
+		self.facesOffsetAddr = facesOffsetAddr
 
 class PakFile:
 	def __init__(self, bs, args={}):
@@ -751,9 +758,18 @@ class PakFile:
 			self.readPak()
 		
 	def getPointerFixupPage(self, readAddr):
-		if readAddr in self.pointerPageIds:
-			return self.pointerPageIds[readAddr]
-		return None
+		try:
+			return self.pointerPageIds[readAddr][0]
+		except:
+			return None
+		
+	def changePointerFixup(self, address, newOffset, newPage):
+		if address in self.pointerPageIds:
+			returnAddr = self.bs.tell()
+			writeUIntAt(self.bs, address, newOffset+20)
+			self.bs.seek(self.pointerPageIds[address][1])
+			self.bs.writeUShort(newPage)
+			self.bs.seek(returnAddr)
 		
 	def readPointerFixup(self, bs=None):
 		bs = bs or self.bs
@@ -821,12 +837,16 @@ class PakFile:
 			pitchOrLinearSize = ds.readUInt()
 			depth = ds.readUInt()
 			numMips = ds.readUInt()
-			ds.seek(44 + 8, 1)
-			compressionType = ds.readUInt()
-			
+			isDX10 = (readUIntAt(ds, 84) == 808540228)
 			ds.seek(hdrSize+4)
+			if isDX10:
+				compressionType = ds.readUInt() 
+				#compressionType = dxFormat.get(compressionType)
+				ds.seek(16, 1) #skip DX10 header
+				
 			imgBytes = ds.readBytes(ds.getSize() - ds.tell())
-			if len(imgBytes) > vramSize:
+			
+			if True: #len(imgBytes) > vramSize: #NEEDS FIXING
 				newDataOffset = bs.getSize()
 				bs.seek(32)
 				bs.writeUInt(readUIntAt(bs, bs.tell())+len(imgBytes)) #added size to raw_data
@@ -982,7 +1002,7 @@ class PakFile:
 			m_page1Idx = bs.readUShort()
 			m_page2Idx = bs.readUShort()
 			pointerOffs = bs.readUInt()
-			self.pointerPageIds[pointerOffs + self.pakPageEntries[m_page1Idx][0]] = m_page2Idx
+			self.pointerPageIds[pointerOffs + self.pakPageEntries[m_page1Idx][0]] = (m_page2Idx, bs.tell()-6)
 			
 		self.jointOffset = self.geoOffset = None
 		
@@ -1203,6 +1223,7 @@ class PakFile:
 				m_pStreamDesc = readPointerFixup()
 				field_40 = bs.readUInt()
 				field_44 = bs.readUInt()
+				facesOffsetAddr = bs.tell()
 				m_pIndexes = readPointerFixup()
 				m_material = readPointerFixup()
 				m_numMaterialInstances = bs.readUInt()
@@ -1241,6 +1262,7 @@ class PakFile:
 					m_unk3 = bs.readUByte()
 					m_unk4 = bs.readUShort()
 					m_compInfoOffs = readPointerFixup()
+					buffOffsAddr = bs.tell()
 					m_bufferOffset = readPointerFixup()
 					
 					bs.seek(m_compInfoOffs)
@@ -1250,9 +1272,10 @@ class PakFile:
 					m_unkC2 = bs.readUByte()
 					m_compType = bs.readUByte()
 					
-					streamDescs.append(StreamDesc(type=m_compType, offset=m_bufferOffset, stride=m_stride))
+					streamDescs.append(StreamDesc(type=m_compType, offset=m_bufferOffset, stride=m_stride, bufferOffsetAddr=buffOffsAddr))
 				
 				self.submeshes.append(PakSubmesh(submeshName, m_numVertexes, m_numIndexes, m_pIndexes, streamDescs))
+				self.submeshes[i].facesOffsetAddr = facesOffsetAddr
 				
 				if nrmRecalcDescOffs:
 					bs.seek(nrmRecalcDescOffs)
@@ -1274,7 +1297,7 @@ class PakFile:
 					bIndicesOffs = readPointerFixup()
 					weightsOffs = readPointerFixup()
 					
-					self.submeshes[i].skinDesc = SkinDesc(mapOffset=bIndicesOffs, weightsOffset=weightsOffs)
+					self.submeshes[i].skinDesc = SkinDesc(mapOffset=bIndicesOffs, weightsOffset=weightsOffs, mapOffsetAddr=bs.tell()-16, weightOffsetAddr=bs.tell()-8)
 				
 				if True: #submeshName.find("lod[1234]") == -1:
 				
@@ -1340,6 +1363,7 @@ class PakFile:
 							doSet = doSet or dialogOptions.loadAllTextures
 							
 							if doSet and not alreadyLoaded:
+								print("loading unique file ", texFileName)
 								self.vramHashes.append(vramHash)
 									
 						material.setMetal(1.0, 1.0)
@@ -1448,9 +1472,10 @@ class PakFile:
 				rapi.rpgClearBufferBinds()
 				
 			print("\n====================================\n\"" + rapi.getLocalFileName(self.path or rapi.getInputName()) + "\" Textures list:")
-			for hash, subTuple in self.vrams.items():
-				if subTuple[1]:
-					print("    " + subTuple[1].replace(".tga", ".dds") + "  --  " + dxFormat.get(readUIntAt(bs, subTuple[0]+72)))
+			sortedTupleList = sorted([ (subTuple[1], subTuple[0]) for hash, subTuple in self.vrams.items() ])
+			for sortTuple in sortedTupleList:
+				if sortTuple[0]:
+					print("    " + sortTuple[0].replace(".tga", ".dds") + "  --  " + dxFormat.get(readUIntAt(bs, sortTuple[1]+72)))
 			print("")
 			
 		else:
@@ -1600,7 +1625,11 @@ def pakWriteModel(mdl, bs):
 		lastLOD = 0
 		f.seek(source.geoOffset[0] + source.geoOffset[1] + 72)
 		submeshesAddr = source.readPointerFixup()
+		newPak = PakFile(bs)
+		newPak.readPak()
 		didWrite = False
+		
+		wb = NoeBitStream()
 		
 		for i, sm in enumerate(source.submeshes):
 			
@@ -1612,71 +1641,71 @@ def pakWriteModel(mdl, bs):
 			if writeMesh and not texOnly:
 				
 				didWrite = True
-				
-				if len(writeMesh.positions) > sm.numVerts:
-					print("Cannot inject", sm.name, "\n	as it exceeds the maximum vertex count of", sm.numVerts, "(has", len(writeMesh.positions),")!")
-					return 0
-				if len(writeMesh.indices) > sm.numIndices:
-					print("Cannot inject", sm.name, "\n	as it exceeds the maximum index count of", sm.numIndices, "(has", len(writeMesh.indices),")!")
-					return 0
+				pageCt = readUIntAt(f, 16)
+				pointerFixupPageCt = readUIntAt(bs, 24)
+				pointerFixupTblOffs = readUIntAt(bs, 28)
+				isModded = (readUIntAt(f, pointerFixupTblOffs + 12*8) == 4294967295)
+				newPageDataAddr = source.pakPageEntries[len(source.pakPageEntries)-1][0] + source.pakPageEntries[len(source.pakPageEntries)-1][1]
+				newPage = pageCt if not isModded else pageCt-1
 				
 				vertOffs = submeshesAddr + 176*i + 36
 				foundPositions = foundUVs = foundNormals = 0
 				
 				for j, sd in enumerate(sm.streamDescs):
 					
-					bs.seek(sd.offset)
-					
 					if ((j == 0 and sd.stride == 12 or sd.stride == 8) or sd.type == 10) and not foundPositions:
-						print(i, "Writing positions at", bs.tell())
+						print(i, "Writing positions at", wb.tell())
 						bFoundPositions = True
+						newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage) #new m_bufferOffset
 						if sd.stride == 12:
 							for v, vert in enumerate(writeMesh.positions):
-								bs.writeFloat(vert[0] * (1/GlobalScale))
-								bs.writeFloat(vert[1] * (1/GlobalScale))
-								bs.writeFloat(vert[2] * (1/GlobalScale))
+								wb.writeFloat(vert[0] * (1/GlobalScale))
+								wb.writeFloat(vert[1] * (1/GlobalScale))
+								wb.writeFloat(vert[2] * (1/GlobalScale))
 						elif sd.stride == 8:
 							for v, vert in enumerate(writeMesh.positions):
-								bs.writeHalfFloat(vert[0] * (1/GlobalScale))
-								bs.writeHalfFloat(vert[1] * (1/GlobalScale))
-								bs.writeHalfFloat(vert[2] * (1/GlobalScale))
-								bs.writeHalfFloat(0)
-								
+								wb.writeHalfFloat(vert[0] * (1/GlobalScale))
+								wb.writeHalfFloat(vert[1] * (1/GlobalScale))
+								wb.writeHalfFloat(vert[2] * (1/GlobalScale))
+								wb.writeHalfFloat(0)
+						print(wb.tell()-4, readUIntAt(wb, wb.tell()-4))
 					elif sd.type == 34 and (foundUVs < 2 or (dialogOptions.exportCopyUV3 or dialogOptions.nullUV3)):
 						foundUVs += 1
 						UVs = writeMesh.lmUVs if dialogOptions.exportCopyUV3 == 2 or foundUVs == 2 else writeMesh.uvs
-						print(i, "Writing UV" + str(foundUVs) + " at", bs.tell())
+						print(i, "Writing UV" + str(foundUVs) + " at", wb.tell())
+						newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
 						if foundUVs > 2 and dialogOptions.nullUV3:
 							print("Nulling UVs...")
 							for v, vert in enumerate(UVs):
-								bs.writeHalfFloat(0)
-								bs.writeHalfFloat(0)
+								wb.writeHalfFloat(0)
+								wb.writeHalfFloat(0)
 						else:
 							for v, vert in enumerate(UVs):
-								bs.writeHalfFloat(vert[0])
-								bs.writeHalfFloat(vert[1])
+								wb.writeHalfFloat(vert[0])
+								wb.writeHalfFloat(vert[1])
 								
 					elif sd.type == 31:
 						foundNormals += 1
+						newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
 						if foundNormals == 1:
-							print(i, "Writing Normals at", bs.tell())
+							print(i, "Writing Normals at", wb.tell())
 							for v, vert in enumerate(writeMesh.tangents): 
-								bs.writeByte(int(vert[0][0] * 127 + 0.5000000001)) #normal
-								bs.writeByte(int(vert[0][1] * 127 + 0.5000000001))
-								bs.writeByte(int(vert[0][2] * 127 + 0.5000000001))
-								bs.writeByte(0)
+								wb.writeByte(int(vert[0][0] * 127 + 0.5000000001)) #normal
+								wb.writeByte(int(vert[0][1] * 127 + 0.5000000001))
+								wb.writeByte(int(vert[0][2] * 127 + 0.5000000001))
+								wb.writeByte(0)
 						elif foundNormals == 2: 
 							foundNormals = 2
-							print(i, "Writing Tangents at", bs.tell())
+							print(i, "Writing Tangents at", wb.tell())
 							for v, vert in enumerate(writeMesh.tangents):
-								bs.writeByte(int(vert[2][0] * 127 + 0.5000000001)) #bitangent
-								bs.writeByte(int(vert[2][1] * 127 + 0.5000000001))
-								bs.writeByte(int(vert[2][2] * 127 + 0.5000000001))
+								wb.writeByte(int(vert[2][0] * 127 + 0.5000000001)) #bitangent
+								wb.writeByte(int(vert[2][1] * 127 + 0.5000000001))
+								wb.writeByte(int(vert[2][2] * 127 + 0.5000000001))
 								TNW = vert[0].cross(vert[1]).dot(vert[2])
 								if (TNW < 0.0):
-									bs.writeByte(129)
+									wb.writeByte(129)
 								else:
-									bs.writeByte(127)
+									wb.writeByte(127)
 					else:
 						if sd.type==10:
 							print(i, "Skipped extra positions buffer", sd.type, "found at", bs.tell())
@@ -1687,39 +1716,38 @@ def pakWriteModel(mdl, bs):
 				
 				if sm.skinDesc:
 					
-					srcWeightCount = fbxWeightCount = 0
-					f.seek(sm.skinDesc.mapOffset)
-					for v in range(sm.numVerts):
-						srcWeightCount += f.readUInt()
-						f.seek(4,1)
+					runningOffset = boneID = 0
+					idxStart = wb.tell()
+					newPak.changePointerFixup(sm.skinDesc.mapOffsetAddr, idxStart, newPage)
 					for vertWeight in writeMesh.weights:
+						wb.writeUInt64(0)
+					wtStart = wb.tell()
+					newPak.changePointerFixup(sm.skinDesc.weightOffsetAddr, wtStart, newPage)
+					for v, vertWeight in enumerate(writeMesh.weights):
+						wb.seek(idxStart + 8*v)
+						wb.writeUInt(len(vertWeight.weights))
+						wb.writeUInt(runningOffset)
+						wb.seek(wtStart + runningOffset)
 						for w, weight in enumerate(vertWeight.weights):
-							if weight > 0: 
-								fbxWeightCount += 1
-					
-					if fbxWeightCount > srcWeightCount:
-						print("Cannot inject weights to", sm.name, "\n	as it exceeds the maximum weight count of", srcWeightCount, "(has", fbxWeightCount,")!")
-						return 0
-					else:
-						runningOffset = boneID = 0
-						for v, vertWeight in enumerate(writeMesh.weights):
-							bs.seek(sm.skinDesc.mapOffset + 8*v)
-							bs.writeUInt(len(vertWeight.weights))
-							bs.writeUInt(runningOffset)
-							bs.seek(sm.skinDesc.weightsOffset + runningOffset)
-							for w, weight in enumerate(vertWeight.weights):
-								try:
-									boneID = boneDict[mdl.bones[vertWeight.indices[w]].name]
-								except:
-									pass
-								bs.writeUInt((boneID << 22) | int(weight * 4194303))
-								runningOffset += 4
+							try:
+								boneID = boneDict[mdl.bones[vertWeight.indices[w]].name]
+							except:
+								pass
+							wb.writeUInt((boneID << 22) | int(weight * 4194303))
+							runningOffset += 4
+							
 						
-				bs.seek(sm.facesOffset)
-				print(i, "Writing indices at", bs.tell())
+				#bs.seek(sm.facesOffset)
+				newPak.changePointerFixup(sm.facesOffsetAddr, wb.tell(), newPage)
+				print(i, "Writing indices at", wb.tell())
 				for k, idx in enumerate(writeMesh.indices):
-					bs.writeUShort(idx)
-				
+					wb.writeUShort(idx)
+					
+				while(wb.tell() % 16 != 0): 
+					wb.writeByte(0)
+				wb.writeUInt64(0)
+				wb.writeUInt(0)
+					
 				#Null out normals recalculation values:
 				if sm.nrmRecalcDesc:
 					bs.seek(sm.nrmRecalcDesc[1])
@@ -1733,7 +1761,8 @@ def pakWriteModel(mdl, bs):
 				bs.seek(vertOffs)
 				bs.writeUInt(len(writeMesh.positions))
 				bs.writeUInt(len(writeMesh.indices))
-		
+				
+
 		#Set all LODs to read as LOD0:
 		if didWrite and not dialogOptions.doLODs:
 			f.seek(source.geoOffset[0] + source.geoOffset[1] + 44)
@@ -1745,30 +1774,79 @@ def pakWriteModel(mdl, bs):
 			for a in range(LODCount):
 				lodDescs.append(source.readPointerFixup())
 			firstLODSubmeshOffs = readUIntAt(f, lodDescs[0] + 24)
+			firstLODSubmeshCount = readUIntAt(f, lodDescs[0] + 4)
 			for a in range(1, LODCount):
 				bs.seek(lodDescs[a] + 24)
 				bs.writeUInt64(firstLODSubmeshOffs)
-		
+				writeUIntAt(bs, lodDescs[a] + 4, firstLODSubmeshCount)
+				
 		#Embed image data
 		path = rapi.getDirForFilePath(expOverMeshName)+rapi.getLocalFileName(expOverMeshName).split(".", 1)[0]
 		print("Checking for textures to embed in", path)
-		
 		if os.path.isdir(path):
 			source.bs = bs
 			vramPathDict = {}
 			for hash, vramTuple in source.vrams.items():
 				vramPathDict[vramTuple[1]] = (vramTuple[0], hash)
 				
-			for root, dirs, files in os.walk(path):
-				for fileName in files:
+			#for root, dirs, files in os.walk(path):
+			#	for fileName in files:
+			for fileName in os.listdir(path):
+				if os.path.isfile(os.path.join(path, fileName)):
 					if fileName.find(".dds") != -1:
 						vramTuple = vramPathDict.get(fileName)
 						if vramTuple:
 							print("\nEmbedding texture", fileName, "at", vramTuple[0])
-							source.writeVRAMImage(vramTuple[0], os.path.join(root, fileName))
+							source.writeVRAMImage(vramTuple[0], os.path.join(path, fileName))
 							vramPathDict[fileName] = 0
 						elif vramTuple != 0:
 							print("Texture was found, but is not in the pak file!\n	", fileName)
+							
+							
+		if didWrite:
+			if not isModded:
+				print("File was not previously injected")
+				writeUIntAt(bs, 28, pointerFixupTblOffs+12)
+				writeUIntAt(bs, 16, pageCt+1) # add new page
+				bs.seek(pointerFixupTblOffs)
+				oldBytes = bs.readBytes(12) #copy old pointerFixup
+				bs.seek(-12, 1)
+				bs.writeUInt(newPageDataAddr + 16) # new page offset
+				bs.writeUInt(wb.getSize()+20) # new page size
+				bs.writeUInt(newPage) # new package owning index
+				bs.writeBytes(oldBytes)
+				padBytes = bs.readBytes(16) #blank padding bytes
+				writeUIntAt(bs, 4, readUIntAt(bs, 4)+16) #add to headerSz
+				writeUIntAt(bs, pointerFixupTblOffs+12+4, readUIntAt(bs, pointerFixupTblOffs+12+4)+16) #add to PointerFixupEntries dataOffset
+				bs.seek(readUIntAt(bs, 20))
+				for i in range(pageCt):
+					bs.writeUInt(readUIntAt(bs, bs.tell())+16) #add to each pageEntryOffset
+					bs.seek(8, 1)
+					
+			else:
+				print("File was previously injected")
+			
+			pointerFixupPageCt = readUIntAt(bs, 24)
+			ns = NoeBitStream()
+			bs.seek(0)
+			if not isModded:
+				ns.writeBytes(bs.readBytes(pointerFixupTblOffs+12*8))
+				ns.writeBytes(padBytes) #move old PointerFixupTables here
+				writeUIntAt(ns, ns.tell()-4, 4294967295) #unique ID for modding identification
+			ns.writeBytes(bs.readBytes(newPageDataAddr - bs.tell()))
 				
+			ns.writeUInt64(16045690984833335023) #DEADBEEF
+			ns.writeUInt(74565) #unknown
+			ns.writeUInt(wb.getSize()+20) #new size
+			ns.writeUShort(newPage)
+			ns.writeUShort(0)
+			ns.writeBytes(wb.getBuffer())
+			if isModded:
+				bs.seek(newPageDataAddr) #skip (delete) contents of page from previous injection
+			ns.writeBytes(bs.readBytes(bs.getSize()-bs.tell()))
+			
+			bs.seek(0)
+			bs.writeBytes(ns.getBuffer())
+			
 	return 1
 	

@@ -7,7 +7,7 @@ global noesis_path = "C:\\Program Files\\Noesis\\Noesis.exe"
 
 global python_plugin = "fmt_nd_pak.py"
 global reimport_path = "F:\\"
-global formNoesisCMD
+global formNPDNoesisCMD
 
 fn collectSkinBones node = (
 	fn findNodesByName list name = (
@@ -38,8 +38,8 @@ fn selectSkeleton node = (
 	select originalSelection
 )
 
-try(destroydialog formNoesisCMD; clearlistener())catch()
-rollout formNoesisCMD "Noesis PAK v0.2" (
+try(destroydialog formNPDNoesisCMD; clearlistener())catch()
+rollout formNPDNoesisCMD "Noesis PAK v0.2" (
 	group "Import" (
 		button btn_import "Import To Scene" align:#center
 		checkbox chk_legacyFBX "Use Legacy FBX" checked:false align:#left tooltip:"Import as FBX 2014"
@@ -95,7 +95,7 @@ rollout formNoesisCMD "Noesis PAK v0.2" (
 		)
 		state
 	)
-	on formNoesisCMD open do (
+	on formNPDNoesisCMD open do (
 		if doesFileExist (try(noesis_path)catch("")) do (
 			edt_noesis.text = noesis_path
 			)
@@ -129,8 +129,8 @@ rollout formNoesisCMD "Noesis PAK v0.2" (
 						"\"" + noesis_path + "\" ?cmode \"" + cmd + "\" \"" + fbx_path + "\"" \
 						 + (if chk_legacyFBX.checked then " -fbxoldexport -fbxexportver FBX201400" else "") \
 						 + (if not chk_rpgOptimize.checked then " -fbxnooptimize" else "") \
-						 + (" -noprompt -fbxmeshmerge") --always
-					)
+						 + (" -noprompt -notex -fbxmeshmerge") --always
+					) -- -
 					if chk_showCMD.checked then (
 						DOSCommand ("\"" + cmd + " -logfile \"" + outtxt_path + "\"") 
 					)
@@ -383,4 +383,4 @@ rollout formNoesisCMD "Noesis PAK v0.2" (
 		FldScale.text = ScaleValue as string
 	)
 )
-createdialog formNoesisCMD
+createdialog formNPDNoesisCMD
