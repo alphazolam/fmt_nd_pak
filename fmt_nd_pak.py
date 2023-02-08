@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Uncharted 4 ".pak" plugin for Rich Whitehouse's Noesis
 #Authors: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v0.2 (February 7, 2023)'
+Version = 'v0.21 (February 8, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -61,6 +61,7 @@ def registerNoesisTypes():
 	noesis.setHandlerTypeCheck(handle, pakCheckType)
 	noesis.setHandlerLoadModel(handle, pakLoadModel)
 	noesis.setHandlerWriteModel(handle, pakWriteModel)
+	noesis.setTypeSharedModelFlags(handle, (noesis.NMSHAREDFL_WANTGLOBALARRAY))
 	#noesis.setHandlerLoadRGBA(handle, pakLoadRGBA)
 	return 1
 	
@@ -127,6 +128,42 @@ def encodeImageData(data, width, height, fmt):
 		
 	return outputData.getBuffer(), mipCount
 
+
+def recombineNoesisMeshes(mdl):
+	
+	meshesBySourceName = {}
+	for mesh in mdl.meshes:
+		meshesBySourceName[mesh.sourceName] = meshesBySourceName.get(mesh.sourceName) or []
+		meshesBySourceName[mesh.sourceName].append(mesh)
+		
+	combinedMeshes = []
+	for name, meshList in meshesBySourceName.items():
+		newPositions = []
+		newUV1 = []
+		newUV2 = []
+		newTangents = []
+		newWeights = []
+		newIndices = []
+		for mesh in meshList:
+			if len(newPositions):
+				for i in range(len(mesh.indices)):
+					mesh.indices[i] += len(newPositions)
+			newPositions.extend(mesh.positions)
+			newUV1.extend(mesh.uvs)
+			newUV2.extend(mesh.lmUVs)
+			newTangents.extend(mesh.tangents)
+			newWeights.extend(mesh.weights)
+			newIndices.extend(mesh.indices)
+			
+		combinedMesh = NoeMesh(newIndices, newPositions, meshList[0].sourceName, meshList[0].sourceName, mdl.globalVtx, mdl.globalIdx)
+		combinedMesh.setTangents(newTangents)
+		combinedMesh.setWeights(newWeights)
+		combinedMesh.setUVs(newUV1)
+		combinedMesh.setUVs(newUV2, 1)
+		combinedMeshes.append(combinedMesh)
+		
+	return combinedMeshes
+
 fullGameNames = ["Uncharted 4", "The Lost Legacy"]
 gamesList = [ "U4", "TLL"]
 
@@ -160,6 +197,8 @@ skelFiles = {
 		"actor77\\npc-normal-fem-base.pak",
 		"actor77\\pistol-base.pak",
 		"actor77\\prison-drake-base.pak",
+		"actor77\\proto.pak",
+		"actor77\\proto-sp.pak",
 		"actor77\\rafe-base.pak",
 		"actor77\\rifle-base.pak",
 		"actor77\\samuel-base.pak",
@@ -199,6 +238,7 @@ skelFiles = {
 		"actor77\\pistol-base.pak",
 		"actor77\\prison-drake-base.pak",
 		"actor77\\proto.pak",
+		"actor77\\proto-sp.pak",
 		"actor77\\rifle-base.pak",
 		"actor77\\rur-combat-column-e-base-a.pak",
 		"actor77\\rur-combat-column-f-base-a.pak",
@@ -669,12 +709,12 @@ class openOptionsDialogWindow:
 				self.loadTexCheckbox.setChecked(dialogOptions.doLoadTex)
 				
 				
-				index = self.noeWnd.createCheckBox("Load Base (Skeleton)", 140, 665, 160, 30, self.checkBaseCheckbox)
-				self.loadBaseCheckbox = self.noeWnd.getControlByIndex(index)
-				self.loadBaseCheckbox.setChecked(dialogOptions.doLoadBase)
+				index = self.noeWnd.createCheckBox("Load All Textures", 140, 665, 160, 30, self.checkLoadAllTexCheckbox)
+				self.loadAllTexCheckbox = self.noeWnd.getControlByIndex(index)
+				self.loadAllTexCheckbox.setChecked(dialogOptions.loadAllTextures)
 				
 				
-				index = self.noeWnd.createCheckBox("Convert Normal Maps", 10, 695, 130, 30, self.checkConvTexCheckbox)
+				index = self.noeWnd.createCheckBox("Convert Normal Maps", 10, 695, 160, 30, self.checkConvTexCheckbox)
 				self.convTexCheckbox = self.noeWnd.getControlByIndex(index)
 				self.convTexCheckbox.setChecked(dialogOptions.doConvertTex)
 				
@@ -684,12 +724,12 @@ class openOptionsDialogWindow:
 				#self.flipUVsCheckbox.setChecked(dialogOptions.doFlipUVs)
 				
 				
-				index = self.noeWnd.createCheckBox("Load All Textures", 140, 695, 130, 30, self.checkLoadAllTexCheckbox)
-				self.loadAllTexCheckbox = self.noeWnd.getControlByIndex(index)
-				self.loadAllTexCheckbox.setChecked(dialogOptions.loadAllTextures)
+				index = self.noeWnd.createCheckBox("Load Base", 170, 695, 90, 30, self.checkBaseCheckbox)
+				self.loadBaseCheckbox = self.noeWnd.getControlByIndex(index)
+				self.loadBaseCheckbox.setChecked(dialogOptions.doLoadBase)
 				
 				
-				index = self.noeWnd.createCheckBox("Import LODs", 280, 695, 100, 30, self.checkLODsCheckbox)
+				index = self.noeWnd.createCheckBox("Import LODs", 270, 695, 100, 30, self.checkLODsCheckbox)
 				self.LODsCheckbox = self.noeWnd.getControlByIndex(index)
 				self.LODsCheckbox.setChecked(dialogOptions.doLODs)
 				
@@ -928,22 +968,22 @@ class PakFile:
 		fmtName = dxFormat.get(imgFormat) or ""
 		
 		if fmtName.find("Bc1") != -1:
-			print("BC1")
+			#print("BC1")
 			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_DXT1)
 		elif fmtName.find("Bc3") != -1:
-			print("BC3")
+			#print("BC3")
 			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC3)
 		elif fmtName.find("Bc4") != -1:
-			print("BC4")
+			#print("BC4")
 			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC4)
 		elif fmtName.find("Bc5") != -1:
-			print("BC5")
+			#print("BC5")
 			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC5)
 		elif fmtName.find("Bc6") != -1: 
-			print("BC6")
+			#print("BC6")
 			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC6H)
 		elif fmtName.find("Bc7") != -1: 
-			print("BC7")
+			#print("BC7")
 			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC7)
 			if dialogOptions.doConvertTex and (texFileName.find("-ao") != -1 or texFileName.find("-occlusion") != -1):
 				texData = rapi.imageEncodeRaw(texData, m_width, m_height, "g16b16")
@@ -1074,7 +1114,7 @@ class PakFile:
 		
 		if self.jointOffset:
 			start = self.jointOffset[1]
-			print("Found Joint Hierarchy offset", self.jointOffset[0] + start, ", location:", self.jointOffset[0] + start + 20 + 32)
+			print("Found Joint Hierarchy") # offset", self.jointOffset[0] + start, ", location:", self.jointOffset[0] + start + 20 + 32)
 			bs.seek(self.jointOffset[0] + start + 20 + 32)
 			boneCount = bs.readUInt()
 			bs.seek(8,1)
@@ -1175,7 +1215,7 @@ class PakFile:
 			
 		if self.geoOffset:
 			start = self.geoOffset[1]
-			print("Found Geometry offset", self.geoOffset[0] + start)
+			print("Found Geometry") # offset", self.geoOffset[0] + start)
 			
 			lastLOD = 0
 			self.submeshes = []
@@ -1204,6 +1244,7 @@ class PakFile:
 			bs.seek(SubmeshesOffs)
 			
 			usedMaterials = {}
+			usedTextures = []
 			
 			for i in range(m_numSubMeshDesc):
 			
@@ -1299,83 +1340,80 @@ class PakFile:
 					
 					self.submeshes[i].skinDesc = SkinDesc(mapOffset=bIndicesOffs, weightsOffset=weightsOffs, mapOffsetAddr=bs.tell()-16, weightOffsetAddr=bs.tell()-8)
 				
-				if True: #submeshName.find("lod[1234]") == -1:
 				
-					bs.seek(m_material)
-					shaderAssetNameOffs = readPointerFixup()
-					shaderTypeOffs = readPointerFixup()
-					shaderOptions0Offs = readPointerFixup()
-					hashCodeOffs = readPointerFixup()
-					shaderOptions1Offs = readPointerFixup()
-					texDescsListOffs = readPointerFixup()
-					shaderOptions3Offs = readPointerFixup()
+				bs.seek(m_material)
+				shaderAssetNameOffs = readPointerFixup()
+				shaderTypeOffs = readPointerFixup()
+				shaderOptions0Offs = readPointerFixup()
+				hashCodeOffs = readPointerFixup()
+				shaderOptions1Offs = readPointerFixup()
+				texDescsListOffs = readPointerFixup()
+				shaderOptions3Offs = readPointerFixup()
+				
+				nameCount = bs.readUInt()
+				paramCount = bs.readUInt()
+				texCount = bs.readUInt()
+				unkCount = bs.readUInt()
+				
+				matName = readStringAt(bs, shaderAssetNameOffs)
+				matType = readStringAt(bs, shaderTypeOffs)
+				matKey = rapi.getLocalFileName(matName[:matName.find(":")])
+				material = usedMaterials.get(m_material) 
+				
+				if not material:
+					material = NoeMaterial(matKey, "")
+					materialFlags = 0
+					loadedDiffuse = loadedNormal = loadedTrans = False
 					
-					nameCount = bs.readUInt()
-					paramCount = bs.readUInt()
-					texCount = bs.readUInt()
-					unkCount = bs.readUInt()
-					
-					matName = readStringAt(bs, shaderAssetNameOffs)
-					matType = readStringAt(bs, shaderTypeOffs)
-					matKey = rapi.getLocalFileName(matName[:matName.find(":")])
-					material = usedMaterials.get(m_material) 
-					
-					if not material:
-						material = NoeMaterial(matKey, "")
-						materialFlags = 0
-						loadedDiffuse = loadedNormal = loadedTrans = False
+					for j in range(texCount):
+						bs.seek(texDescsListOffs + 40*j)
+						nameAddr = readPointerFixup()
+						name = readStringAt(bs, nameAddr)
+						bs.seek(8,1) #path = readStringAt(bs, readPointerFixup())
+						bs.seek(readPointerFixup())
+						path = readStringAt(bs, readPointerFixup())
+						vramHash = bs.readUInt64()
 						
-						for j in range(texCount):
-							bs.seek(texDescsListOffs + 40*j)
-							nameAddr = readPointerFixup()
-							name = readStringAt(bs, nameAddr)
-							bs.seek(8,1) #path = readStringAt(bs, readPointerFixup())
-							bs.seek(readPointerFixup())
-							path = readStringAt(bs, readPointerFixup())
-							vramHash = bs.readUInt64()
+						texFileName = rapi.getLocalFileName(path[:path.find(".tga")+4]).replace(".tga", ".dds")
+						tex = doSet = None
+						
+						if not loadedDiffuse and name.find("BaseColor") != -1:
+							doSet = loadedDiffuse =  True 
+							material.setTexture(texFileName)
+							#material.setSpecularTexture(texFileName)
+							#materialFlags |=   noesis.NMATFLAG_PBR_SPEC
 							
-							#texFileName = rapi.getLocalFileName(path[:path.find(".tga")+4]).replace(".tga", "_" + path[path.find(".tga")+5:] + ".tga")
-							texFileName = rapi.getLocalFileName(path[:path.find(".tga")+4]).replace(".tga", ".dds")
-							alreadyLoaded = (texFileName in [tex.name for tex in self.texList])
-							tex = doSet = None
+						elif not loadedNormal and name.find("NR") != -1:
+							doSet = loadedNormal = True
+							material.setNormalTexture(texFileName)
+							if dialogOptions.doConvertTex:
+								materialFlags |= noesis.NMATFLAG_NORMALMAP_FLIPY #| noesis.NMATFLAG_NORMALMAP_NODERZ
 							
-							if not loadedDiffuse and name.find("BaseColor") != -1:
-								doSet = loadedDiffuse =  True 
+						elif not loadedTrans and name.find("Transp") != -1:
+							doSet = loadedTrans = True
+							material.setOpacityTexture(texFileName)
+							material.setAlphaTest(0.05)
+							
+							if not loadedDiffuse:
 								material.setTexture(texFileName)
-								#material.setSpecularTexture(texFileName)
-								#materialFlags |=   noesis.NMATFLAG_PBR_SPEC
+							if not loadedNormal:
+								material.setNormalTexture(material.texName) #alpha wont work without a diffuse and normal map
 								
-							elif not loadedNormal and name.find("NR") != -1:
-								doSet = loadedNormal = True
-								material.setNormalTexture(texFileName)
-								materialFlags |=   noesis.NMATFLAG_NORMALMAP_FLIPY #| noesis.NMATFLAG_NORMALMAP_NODERZ
-								
-							elif not loadedTrans and name.find("Transp") != -1:
-								doSet = loadedTrans = True
-								material.setOpacityTexture(texFileName)
-								material.setAlphaTest(0.05)
-								
-								if not loadedDiffuse:
-									material.setTexture(texFileName)
-								if not loadedNormal:
-									material.setNormalTexture(material.texName) #alpha wont work without a diffuse and normal map
-									
-							doSet = doSet or dialogOptions.loadAllTextures
-							
-							if doSet and not alreadyLoaded:
-								print("loading unique file ", texFileName)
-								self.vramHashes.append(vramHash)
-									
-						material.setMetal(1.0, 1.0)
-						material.setRoughness(1.0, 1.0)
-						material.setFlags(materialFlags)
-						usedMaterials[m_material] = material
-						self.matList.append(material)
+						doSet = doSet or dialogOptions.loadAllTextures
 						
-					self.matNames.append(material.name)
+						if doSet and texFileName and texFileName not in usedTextures:
+							self.vramHashes.append(vramHash)
+							usedTextures.append(texFileName)
+								
+					#material.setMetal(1.0, 1.0)
+					#material.setRoughness(1.0, 1.0)
+					material.setFlags(materialFlags)
+					usedMaterials[m_material] = material
+					self.matList.append(material)
+					
+				self.matNames.append(material.name)
 				
 				bs.seek(place)
-				
 
 			
 	def loadGeometry(self):
@@ -1392,7 +1430,14 @@ class PakFile:
 					tex = self.loadVRAM(self.vrams[vramHash][0])
 					if tex:  
 						self.texList.append(tex)
-			
+				alreadyLoadedList = [tex.name for tex in self.texList]
+				if dialogOptions.loadAllTextures:
+					for hash, subTuple in self.vrams.items():
+						if subTuple[1] and subTuple[1] not in alreadyLoadedList:
+							tex = self.loadVRAM(subTuple[0])
+							if tex:  
+								self.texList.append(tex)
+								
 			for i, sm in enumerate(self.submeshes):
 				lodFind = sm.name.find("Shape")
 				LODidx = int(sm.name[lodFind+5]) if lodFind != -1 and sm.name[lodFind+5].isnumeric() else 0
@@ -1622,149 +1667,192 @@ def pakWriteModel(mdl, bs):
 	
 	if source.submeshes:
 		
+		doWrite = False
 		lastLOD = 0
+		isNoesisSplit = (mdl.meshes[0].name[4] == "_" and mdl.meshes[0].name[0] == "0")
+		fbxMeshList = mdl.meshes if not isNoesisSplit else recombineNoesisMeshes(mdl)
+		
 		f.seek(source.geoOffset[0] + source.geoOffset[1] + 72)
 		submeshesAddr = source.readPointerFixup()
+		
 		newPak = PakFile(bs)
 		newPak.readPak()
-		didWrite = False
-		
 		wb = NoeBitStream()
 		
-		for i, sm in enumerate(source.submeshes):
+		if not texOnly:
 			
-			writeMesh = None
-			for mesh in mdl.meshes:
-				if mesh.name == sm.name:
-					writeMesh = mesh; break
+			meshesToInject = []
+			submeshesFound = []
 			
-			if writeMesh and not texOnly:
-				
-				didWrite = True
-				pageCt = readUIntAt(f, 16)
-				pointerFixupPageCt = readUIntAt(bs, 24)
-				pointerFixupTblOffs = readUIntAt(bs, 28)
-				isModded = (readUIntAt(f, pointerFixupTblOffs + 12*8) == 4294967295)
-				newPageDataAddr = source.pakPageEntries[len(source.pakPageEntries)-1][0] + source.pakPageEntries[len(source.pakPageEntries)-1][1]
-				newPage = pageCt if not isModded else pageCt-1
-				
-				vertOffs = submeshesAddr + 176*i + 36
-				foundPositions = foundUVs = foundNormals = 0
-				
-				for j, sd in enumerate(sm.streamDescs):
+			for i, sm in enumerate(source.submeshes):
+				writeMesh = None
+				for mesh in fbxMeshList:
+					fixMeshName = rapi.getExtensionlessName(mesh.name)
+					if fixMeshName == sm.name:
+						writeMesh = mesh
+						submeshesFound.append(fixMeshName)
+						break
+				if not writeMesh:
+					blankMeshName = sm.name
+					blankTangent = NoeMat43((NoeVec3((0,0,0)), NoeVec3((0,0,0)), NoeVec3((0,0,0)), NoeVec3((0,0,0)))) 
+					blankWeight = NoeVertWeight([0], [1])
+					writeMesh = NoeMesh([0, 1, 2], [NoeVec3((0.00000000001,0,0)), NoeVec3((0,0.00000000001,0)), NoeVec3((0,0,0.00000000001))], blankMeshName, blankMeshName, -1, -1) #positions and faces
+					writeMesh.setUVs([NoeVec3((0,0,0)), NoeVec3((0,0,0)), NoeVec3((0,0,0))]) #UV1
+					writeMesh.setUVs([NoeVec3((0,0,0)), NoeVec3((0,0,0)), NoeVec3((0,0,0))], 1) #UV2
+					writeMesh.setTangents([blankTangent, blankTangent, blankTangent]) #Normals + Tangents
+					writeMesh.setWeights([blankWeight,blankWeight,blankWeight]) #Weights + Indices
+				meshesToInject.append((writeMesh, sm))
+			
+			if len(submeshesFound) > 0:
+				doWrite = True
+				print("Found the following submeshes to inject from FBX:")
+				for meshName in submeshesFound: 
+					print("    " + meshName)
+				print("\nAll other submeshes in this pak file will be turned into invisible placeholders.\n")
+			else:
+				print("Found no submeshes to inject from FBX, copying original file...")
+			
+			if doWrite:
+				for i, meshTuple in enumerate(meshesToInject):
 					
-					if ((j == 0 and sd.stride == 12 or sd.stride == 8) or sd.type == 10) and not foundPositions:
-						print(i, "Writing positions at", wb.tell())
-						bFoundPositions = True
-						newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage) #new m_bufferOffset
-						if sd.stride == 12:
-							for v, vert in enumerate(writeMesh.positions):
-								wb.writeFloat(vert[0] * (1/GlobalScale))
-								wb.writeFloat(vert[1] * (1/GlobalScale))
-								wb.writeFloat(vert[2] * (1/GlobalScale))
-						elif sd.stride == 8:
-							for v, vert in enumerate(writeMesh.positions):
-								wb.writeHalfFloat(vert[0] * (1/GlobalScale))
-								wb.writeHalfFloat(vert[1] * (1/GlobalScale))
-								wb.writeHalfFloat(vert[2] * (1/GlobalScale))
-								wb.writeHalfFloat(0)
-						print(wb.tell()-4, readUIntAt(wb, wb.tell()-4))
-					elif sd.type == 34 and (foundUVs < 2 or (dialogOptions.exportCopyUV3 or dialogOptions.nullUV3)):
-						foundUVs += 1
-						UVs = writeMesh.lmUVs if dialogOptions.exportCopyUV3 == 2 or foundUVs == 2 else writeMesh.uvs
-						print(i, "Writing UV" + str(foundUVs) + " at", wb.tell())
-						newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
-						if foundUVs > 2 and dialogOptions.nullUV3:
-							print("Nulling UVs...")
-							for v, vert in enumerate(UVs):
-								wb.writeHalfFloat(0)
-								wb.writeHalfFloat(0)
-						else:
-							for v, vert in enumerate(UVs):
-								wb.writeHalfFloat(vert[0])
-								wb.writeHalfFloat(vert[1])
-								
-					elif sd.type == 31:
-						foundNormals += 1
-						newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
-						if foundNormals == 1:
-							print(i, "Writing Normals at", wb.tell())
-							for v, vert in enumerate(writeMesh.tangents): 
-								wb.writeByte(int(vert[0][0] * 127 + 0.5000000001)) #normal
-								wb.writeByte(int(vert[0][1] * 127 + 0.5000000001))
-								wb.writeByte(int(vert[0][2] * 127 + 0.5000000001))
-								wb.writeByte(0)
-						elif foundNormals == 2: 
-							foundNormals = 2
-							print(i, "Writing Tangents at", wb.tell())
-							for v, vert in enumerate(writeMesh.tangents):
-								wb.writeByte(int(vert[2][0] * 127 + 0.5000000001)) #bitangent
-								wb.writeByte(int(vert[2][1] * 127 + 0.5000000001))
-								wb.writeByte(int(vert[2][2] * 127 + 0.5000000001))
-								TNW = vert[0].cross(vert[1]).dot(vert[2])
-								if (TNW < 0.0):
-									wb.writeByte(129)
-								else:
-									wb.writeByte(127)
-					else:
-						if sd.type==10:
-							print(i, "Skipped extra positions buffer", sd.type, "found at", bs.tell())
-						elif sd.type==31:
-							print(i, "Skipped extra normals/tangents buffer", sd.type, "found at", bs.tell())
-						else:
-							print(i, "Skipped extra component type", sd.type, "found at", bs.tell())
-				
-				if sm.skinDesc:
+					writeMesh = meshTuple[0]
+					sm = meshTuple[1]
+					print("Injecting ", writeMesh.name)
 					
-					runningOffset = boneID = 0
-					idxStart = wb.tell()
-					newPak.changePointerFixup(sm.skinDesc.mapOffsetAddr, idxStart, newPage)
-					for vertWeight in writeMesh.weights:
-						wb.writeUInt64(0)
-					wtStart = wb.tell()
-					newPak.changePointerFixup(sm.skinDesc.weightOffsetAddr, wtStart, newPage)
-					for v, vertWeight in enumerate(writeMesh.weights):
-						wb.seek(idxStart + 8*v)
-						wb.writeUInt(len(vertWeight.weights))
-						wb.writeUInt(runningOffset)
-						wb.seek(wtStart + runningOffset)
-						for w, weight in enumerate(vertWeight.weights):
-							try:
-								boneID = boneDict[mdl.bones[vertWeight.indices[w]].name]
-							except:
-								pass
-							wb.writeUInt((boneID << 22) | int(weight * 4194303))
-							runningOffset += 4
-							
+					pageCt = readUIntAt(f, 16)
+					pointerFixupPageCt = readUIntAt(bs, 24)
+					pointerFixupTblOffs = readUIntAt(bs, 28)
+					isModded = (readUIntAt(f, pointerFixupTblOffs + 12*8) == 4294967295)
+					newPageDataAddr = source.pakPageEntries[len(source.pakPageEntries)-1][0] + source.pakPageEntries[len(source.pakPageEntries)-1][1]
+					newPage = pageCt if not isModded else pageCt-1
+					owningIndex = source.pakPageEntries[len(source.pakPageEntries)-1][2]
+					
+					vertOffs = submeshesAddr + 176*i + 36
+					foundPositions = foundUVs = foundNormals = 0
+					
+					for j, sd in enumerate(sm.streamDescs):
 						
-				#bs.seek(sm.facesOffset)
-				newPak.changePointerFixup(sm.facesOffsetAddr, wb.tell(), newPage)
-				print(i, "Writing indices at", wb.tell())
-				for k, idx in enumerate(writeMesh.indices):
-					wb.writeUShort(idx)
+						if ((j == 0 and sd.stride == 12 or sd.stride == 8)) and not foundPositions:
+							#print(i, "Writing positions at", wb.tell())
+							bFoundPositions = True
+							newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
+							if sd.stride == 12:
+								for v, vert in enumerate(writeMesh.positions):
+									wb.writeFloat(vert[0] * (1/GlobalScale))
+									wb.writeFloat(vert[1] * (1/GlobalScale))
+									wb.writeFloat(vert[2] * (1/GlobalScale))
+							elif sd.stride == 8:
+								for v, vert in enumerate(writeMesh.positions):
+									wb.writeHalfFloat(vert[0] * (1/GlobalScale))
+									wb.writeHalfFloat(vert[1] * (1/GlobalScale))
+									wb.writeHalfFloat(vert[2] * (1/GlobalScale))
+									wb.writeHalfFloat(0)
+						elif sd.type == 34 and (foundUVs < 2 or (dialogOptions.exportCopyUV3 or dialogOptions.nullUV3)):
+							foundUVs += 1
+							UVs = writeMesh.lmUVs if dialogOptions.exportCopyUV3 == 2 or foundUVs == 2 else writeMesh.uvs
+							#print(i, "Writing UV" + str(foundUVs) + " at", wb.tell())
+							newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
+							if foundUVs > 2 and dialogOptions.nullUV3:
+								print(i, "Nulling UV" + str(foundUVs) + " for", sm.name)
+								for v, vert in enumerate(UVs):
+									wb.writeHalfFloat(0)
+									wb.writeHalfFloat(0)
+							else:
+								for v, vert in enumerate(UVs):
+									wb.writeHalfFloat(vert[0])
+									wb.writeHalfFloat(vert[1])
+									
+						elif sd.type == 31:
+							foundNormals += 1
+							newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
+							if foundNormals == 1:
+								#print(i, "Writing Normals at", wb.tell())
+								for v, vert in enumerate(writeMesh.tangents): 
+									wb.writeByte(int(vert[0][0] * 127 + 0.5000000001)) #normal
+									wb.writeByte(int(vert[0][1] * 127 + 0.5000000001))
+									wb.writeByte(int(vert[0][2] * 127 + 0.5000000001))
+									wb.writeByte(0)
+							elif foundNormals == 2: 
+								foundNormals = 2
+								#print(i, "Writing Tangents at", wb.tell())
+								for v, vert in enumerate(writeMesh.tangents):
+									wb.writeByte(int(vert[2][0] * 127 + 0.5000000001)) #bitangent
+									wb.writeByte(int(vert[2][1] * 127 + 0.5000000001))
+									wb.writeByte(int(vert[2][2] * 127 + 0.5000000001))
+									TNW = vert[0].cross(vert[1]).dot(vert[2])
+									if (TNW < 0.0):
+										wb.writeByte(129)
+									else:
+										wb.writeByte(127)
+						else:
+							print("Unknown component", sd.type, "!!")
+						'''elif sd.type == 10:
+							print("Writing unknown vector3 component")
+							for v, vert in enumerate(writeMesh.positions):
+								wb.writeHalfFloat(1)
+								wb.writeHalfFloat(1)
+								wb.writeHalfFloat(1)
+								wb.writeHalfFloat(0)'''
+
+						'''else:
+							if sd.type==10:
+								print(i, "Skipped extra positions buffer", sd.type, "found at", bs.tell())
+							elif sd.type==31:
+								print(i, "Skipped extra normals/tangents buffer", sd.type, "found at", bs.tell())
+							else:
+								print(i, "Skipped extra component type", sd.type, "found at", bs.tell())'''
 					
-				while(wb.tell() % 16 != 0): 
-					wb.writeByte(0)
-				wb.writeUInt64(0)
-				wb.writeUInt(0)
+					if sm.skinDesc:
+						
+						runningOffset = boneID = 0
+						idxStart = wb.tell()
+						newPak.changePointerFixup(sm.skinDesc.mapOffsetAddr, idxStart, newPage)
+						for vertWeight in writeMesh.weights:
+							wb.writeUInt64(0)
+						wtStart = wb.tell()
+						newPak.changePointerFixup(sm.skinDesc.weightOffsetAddr, wtStart, newPage)
+						for v, vertWeight in enumerate(writeMesh.weights):
+							wb.seek(idxStart + 8*v)
+							wb.writeUInt(len(vertWeight.weights))
+							wb.writeUInt(runningOffset)
+							wb.seek(wtStart + runningOffset)
+							for w, weight in enumerate(vertWeight.weights):
+								try:
+									boneID = boneDict[mdl.bones[vertWeight.indices[w]].name]
+								except:
+									pass
+								wb.writeUInt((boneID << 22) | int(weight * 4194303))
+								runningOffset += 4
+								
+							
+					newPak.changePointerFixup(sm.facesOffsetAddr, wb.tell(), newPage)
+					#print(i, "Writing indices at", wb.tell())
+					for k, idx in enumerate(writeMesh.indices):
+						wb.writeUShort(idx)
+						
+					while(wb.tell() % 16 != 0): 
+						wb.writeByte(0)
+					wb.writeUInt64(0)
+					wb.writeUInt(0)
+						
+					#Null out normals recalculation values:
+					if sm.nrmRecalcDesc:
+						bs.seek(sm.nrmRecalcDesc[1])
+						for k in range(sm.nrmRecalcDesc[4]):
+							bs.writeShort(0)
+						bs.seek(sm.nrmRecalcDesc[3])
+						for k in range(sm.nrmRecalcDesc[4]):
+							bs.writeShort(0)
 					
-				#Null out normals recalculation values:
-				if sm.nrmRecalcDesc:
-					bs.seek(sm.nrmRecalcDesc[1])
-					for k in range(sm.nrmRecalcDesc[4]):
-						bs.writeShort(0)
-					bs.seek(sm.nrmRecalcDesc[3])
-					for k in range(sm.nrmRecalcDesc[4]):
-						bs.writeShort(0)
-				
-				#set vertex/index counts:
-				bs.seek(vertOffs)
-				bs.writeUInt(len(writeMesh.positions))
-				bs.writeUInt(len(writeMesh.indices))
-				
+					#set vertex/index counts:
+					bs.seek(vertOffs)
+					bs.writeUInt(len(writeMesh.positions))
+					bs.writeUInt(len(writeMesh.indices))
+			if isNoesisSplit:
+				print("\nWARNING:	Duplicate mesh names detected! Check your FBX for naming or geometry issues. This pak may crash the game!\n")
 
 		#Set all LODs to read as LOD0:
-		if didWrite and not dialogOptions.doLODs:
+		if doWrite and not dialogOptions.doLODs:
 			f.seek(source.geoOffset[0] + source.geoOffset[1] + 44)
 			LODCount = f.readUInt()
 			f.seek(32, 1)
@@ -1789,8 +1877,6 @@ def pakWriteModel(mdl, bs):
 			for hash, vramTuple in source.vrams.items():
 				vramPathDict[vramTuple[1]] = (vramTuple[0], hash)
 				
-			#for root, dirs, files in os.walk(path):
-			#	for fileName in files:
 			for fileName in os.listdir(path):
 				if os.path.isfile(os.path.join(path, fileName)):
 					if fileName.find(".dds") != -1:
@@ -1803,7 +1889,7 @@ def pakWriteModel(mdl, bs):
 							print("Texture was found, but is not in the pak file!\n	", fileName)
 							
 							
-		if didWrite:
+		if doWrite:
 			if not isModded:
 				print("File was not previously injected")
 				writeUIntAt(bs, 28, pointerFixupTblOffs+12)
@@ -1813,7 +1899,7 @@ def pakWriteModel(mdl, bs):
 				bs.seek(-12, 1)
 				bs.writeUInt(newPageDataAddr + 16) # new page offset
 				bs.writeUInt(wb.getSize()+20) # new page size
-				bs.writeUInt(newPage) # new package owning index
+				bs.writeUInt(owningIndex) # new package owning index
 				bs.writeBytes(oldBytes)
 				padBytes = bs.readBytes(16) #blank padding bytes
 				writeUIntAt(bs, 4, readUIntAt(bs, 4)+16) #add to headerSz
@@ -1826,7 +1912,7 @@ def pakWriteModel(mdl, bs):
 			else:
 				print("File was previously injected")
 			
-			pointerFixupPageCt = readUIntAt(bs, 24)
+			#pointerFixupPageCt = readUIntAt(bs, 24)
 			ns = NoeBitStream()
 			bs.seek(0)
 			if not isModded:
@@ -1836,9 +1922,9 @@ def pakWriteModel(mdl, bs):
 			ns.writeBytes(bs.readBytes(newPageDataAddr - bs.tell()))
 				
 			ns.writeUInt64(16045690984833335023) #DEADBEEF
-			ns.writeUInt(74565) #unknown
+			ns.writeUInt(0) #74565) #unknown
 			ns.writeUInt(wb.getSize()+20) #new size
-			ns.writeUShort(newPage)
+			ns.writeUShort(owningIndex)
 			ns.writeUShort(0)
 			ns.writeBytes(wb.getBuffer())
 			if isModded:

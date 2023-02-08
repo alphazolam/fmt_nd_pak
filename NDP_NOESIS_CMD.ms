@@ -1,6 +1,6 @@
 --Naughty Dog PAK Noesis CMD tool
---Version: v0.2
---Last Release: February 5 2023
+--Version: v0.21
+--Last Release: February 8 2023
 --Created by: alphaZomega 
 
 global noesis_path = "C:\\Program Files\\Noesis\\Noesis.exe"
@@ -39,7 +39,7 @@ fn selectSkeleton node = (
 )
 
 try(destroydialog formNPDNoesisCMD; clearlistener())catch()
-rollout formNPDNoesisCMD "Noesis PAK v0.2" (
+rollout formNPDNoesisCMD "Noesis PAK v0.21" (
 	group "Import" (
 		button btn_import "Import To Scene" align:#center
 		checkbox chk_legacyFBX "Use Legacy FBX" checked:false align:#left tooltip:"Import as FBX 2014"
@@ -224,21 +224,18 @@ rollout formNPDNoesisCMD "Noesis PAK v0.2" (
 					exit
 				)
 				
-				local copyNodes = #()
+				/*local copyNodes = #()
 				for obj in originalSelection where obj.modifiers[#Skin] != undefined do ( 
-					--try (
-						selectSkeleton obj
-						--if chk_writeBones.checked then ( --Create dummy mesh with all bones in skin modifier so that FBX will save all bones
-							maxOps.cloneNodes obj cloneType:#copy newNodes:&copyNodes #nodialog
-							local lastSelection = (selection as array); select copyNodes[1]; copyNodes[1].name = "FBXBoneStorage"
-							for bn in lastSelection do 
-								if superclassof bn == Helper or classof bn == BoneGeometry then 
-									skinops.addBone copyNodes[1].modifiers[#Skin] bn 0
-							selectmore lastSelection
-						--)
-						exit
-					--) catch ( print "Could not select skeleton! Select bones manually before export" )
-				)
+					selectSkeleton obj
+					--Create dummy mesh with all bones in skin modifier so that FBX will save all bones
+					maxOps.cloneNodes obj cloneType:#copy newNodes:&copyNodes #nodialog
+					local lastSelection = (selection as array); select copyNodes[1]; copyNodes[1].name = "FBXBoneStorage"
+					for bn in lastSelection do 
+						if superclassof bn == Helper or classof bn == BoneGeometry then 
+							skinops.addBone copyNodes[1].modifiers[#Skin] bn 0
+					selectmore lastSelection
+					exit
+				)*/
 				
 				if chk_showPlugOpt.checked then (--chk_expPrompt
 					exportFile fbx_path selectedOnly:true using:FBXEXP
@@ -264,7 +261,7 @@ rollout formNPDNoesisCMD "Noesis PAK v0.2" (
 						format "Deleted FBX file %" fbx_path
 					)
 				)
-				if copyNodes[1] != undefined then delete copyNodes[1]
+				--if copyNodes[1] != undefined then delete copyNodes[1]
 					
 				actionMan.executeAction 0 "40472" --open listener
 				
