@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Uncharted 4 ".pak" plugin for Rich Whitehouse's Noesis
 #Authors: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v0.21 (February 8, 2023)'
+Version = 'v0.22 (February 8, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -1278,6 +1278,7 @@ class PakFile:
 				field_7C = bs.readUInt()
 				field_80 = bs.readUInt()
 				field_84 = bs.readUInt()
+				nrmRecalcDescOffsOffset = bs.tell()
 				nrmRecalcDescOffs = readPointerFixup()
 				field_90 = bs.readUInt()
 				field_94 = bs.readUInt()
@@ -1327,7 +1328,7 @@ class PakFile:
 					ptr3 = readPointerFixup()
 					ptr4 = readPointerFixup()
 					
-					self.submeshes[i].nrmRecalcDesc = [ptr1, ptr2, ptr3, ptr4, indexCount]
+					self.submeshes[i].nrmRecalcDesc = [ptr1, ptr2, ptr3, ptr4, indexCount, nrmRecalcDescOffsOffset]
 				
 				if skindataOffset:
 					bs.seek(skindataOffset)
@@ -1619,32 +1620,34 @@ def pakWriteModel(mdl, bs):
 	
 	def getExportName(fileName):		
 		if fileName == None:
-			expOverMeshName = re.sub(r'out\w+\.', '.', rapi.getOutputName().lower()).replace("fbx",".").replace("out.pak",".pak")
+			injectMeshName = re.sub(r'out\w+\.', '.', rapi.getOutputName().lower()).replace("fbx",".").replace("out.pak",".pak")
+			if rapi.checkFileExists(injectMeshName.replace(".pak", ".orig.pak")):
+				injectMeshName = injectMeshName.replace(".pak", ".orig.pak")
 		else:
-			expOverMeshName = fileName
-		expOverMeshName = noesis.userPrompt(noesis.NOEUSERVAL_FILEPATH, "Export .pak", "Choose a .pak file to inject", expOverMeshName, None)
+			injectMeshName = fileName
+		injectMeshName = noesis.userPrompt(noesis.NOEUSERVAL_FILEPATH, "Export .pak", "Choose a .pak file to inject", injectMeshName, None)
 		
-		if expOverMeshName == None:
+		if injectMeshName == None:
 			print("Aborting...")
 			return
-		return expOverMeshName
+		return injectMeshName
 	
 	fileName = None
 	if noesis.optWasInvoked("-meshfile"):
-		expOverMeshName = noesis.optGetArg("-meshfile")
+		injectMeshName = noesis.optGetArg("-meshfile")
 	else:
-		expOverMeshName = getExportName(fileName)
+		injectMeshName = getExportName(fileName)
 		
-	if expOverMeshName == None:
+	if injectMeshName == None:
 		return 0
-	while not (rapi.checkFileExists(expOverMeshName)):
+	while not (rapi.checkFileExists(injectMeshName)):
 		print ("File not found!")
-		expOverMeshName = getExportName(fileName)	
-		fileName = expOverMeshName
-		if expOverMeshName == None:
+		injectMeshName = getExportName(fileName)	
+		fileName = injectMeshName
+		if injectMeshName == None:
 			return 0
 			
-	srcMesh = rapi.loadIntoByteArray(expOverMeshName)
+	srcMesh = rapi.loadIntoByteArray(injectMeshName)
 	
 	f = NoeBitStream(srcMesh)
 	magic = readUIntAt(f, 0) 
@@ -1708,7 +1711,7 @@ def pakWriteModel(mdl, bs):
 				print("Found the following submeshes to inject from FBX:")
 				for meshName in submeshesFound: 
 					print("    " + meshName)
-				print("\nAll other submeshes in this pak file will be turned into invisible placeholders.\n")
+				print("\nAll other submeshes in this pak will be turned into invisible placeholders.\n")
 			else:
 				print("Found no submeshes to inject from FBX, copying original file...")
 			
@@ -1717,6 +1720,13 @@ def pakWriteModel(mdl, bs):
 					
 					writeMesh = meshTuple[0]
 					sm = meshTuple[1]
+					lodFind = sm.name.find("Shape")
+					LODidx = int(sm.name[lodFind+5]) if lodFind != -1 and sm.name[lodFind+5].isnumeric() else 0
+					if LODidx > lastLOD:
+						lastLOD = LODidx
+					if not dialogOptions.doLODs and LODidx > 0:
+						continue
+					
 					print("Injecting ", writeMesh.name)
 					
 					pageCt = readUIntAt(f, 16)
@@ -1837,6 +1847,8 @@ def pakWriteModel(mdl, bs):
 						
 					#Null out normals recalculation values:
 					if sm.nrmRecalcDesc:
+						#bs.seek(sm.nrmRecalcDesc[5])
+						#bs.writeUInt64(0)
 						bs.seek(sm.nrmRecalcDesc[1])
 						for k in range(sm.nrmRecalcDesc[4]):
 							bs.writeShort(0)
@@ -1869,8 +1881,8 @@ def pakWriteModel(mdl, bs):
 				writeUIntAt(bs, lodDescs[a] + 4, firstLODSubmeshCount)
 				
 		#Embed image data
-		path = rapi.getDirForFilePath(expOverMeshName)+rapi.getLocalFileName(expOverMeshName).split(".", 1)[0]
-		print("Checking for textures to embed in", path)
+		path = rapi.getDirForFilePath(injectMeshName)+rapi.getLocalFileName(injectMeshName).split(".", 1)[0]
+		print("\nChecking for textures to embed in", path)
 		if os.path.isdir(path):
 			source.bs = bs
 			vramPathDict = {}
@@ -1891,7 +1903,7 @@ def pakWriteModel(mdl, bs):
 							
 		if doWrite:
 			if not isModded:
-				print("File was not previously injected")
+				print("\nFile was not previously injected")
 				writeUIntAt(bs, 28, pointerFixupTblOffs+12)
 				writeUIntAt(bs, 16, pageCt+1) # add new page
 				bs.seek(pointerFixupTblOffs)
@@ -1910,7 +1922,7 @@ def pakWriteModel(mdl, bs):
 					bs.seek(8, 1)
 					
 			else:
-				print("File was previously injected")
+				print("\nFile was previously injected")
 			
 			#pointerFixupPageCt = readUIntAt(bs, 24)
 			ns = NoeBitStream()
