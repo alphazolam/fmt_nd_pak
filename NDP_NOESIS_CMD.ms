@@ -1,5 +1,5 @@
 --Naughty Dog PAK Noesis CMD tool
---Version: v0.21
+--Version: v0.22
 --Last Release: February 8 2023
 --Created by: alphaZomega 
 
@@ -39,12 +39,13 @@ fn selectSkeleton node = (
 )
 
 try(destroydialog formNPDNoesisCMD; clearlistener())catch()
-rollout formNPDNoesisCMD "Noesis PAK v0.21" (
+rollout formNPDNoesisCMD "Noesis PAK v0.22" (
 	group "Import" (
 		button btn_import "Import To Scene" align:#center
 		checkbox chk_legacyFBX "Use Legacy FBX" checked:false align:#left tooltip:"Import as FBX 2014"
 		checkbox chk_rpgOptimize "Optimize" checked:true align:#left tooltip:"Have Noesis automatically remove duplicate vertices on import"
 		checkbox chk_folder "Import Folder" checked:false align:#left
+		checkbox chk_populateBones "Populate Bones Lists" checked:true align:#left tooltip:"Populate the bones list of every Skin modifier to have all bones"
 	)
 	group "Export" (
 		button btn_export "Export To Game" align:#center
@@ -164,10 +165,10 @@ rollout formNPDNoesisCMD "Noesis PAK v0.21" (
 					
 					if chk_delFBX.checked do (
 						deleteFile fbx_path
-						format "Deleted FBX file %" fbx_path
+						format "Deleted FBX file %\n" fbx_path
 					)
 					
-					format "%\n" cmd --print the command for reference
+					format "\nImport Command: %\n" cmd --print the command for reference
 					
 					if success then (
 						with redraw off (
@@ -186,14 +187,20 @@ rollout formNPDNoesisCMD "Noesis PAK v0.21" (
 								if getNumVerts mesh == 3 or mesh.modifiers[#Skin] == undefined then continue
 								select mesh
 								max modify mode
-								mesh.modifiers[#Skin].bone_Limit = 8 
+								sk = mesh.modifiers[#Skin]
+								sk.bone_Limit = 8 
+								skinOps.RemoveZeroWeights sk
 								--local boneNames = for i=1 to (skinOps.GetNumberBones mesh.modifiers[#Skin]) collect (skinOps.GetBoneName mesh.modifiers[#Skin] i 0)
 								for bone in bones do (
 									bone.showLinks = true
 									bone.showLinksOnly = true
 									bone.wirecolor = orange
-									--if findItem boneNames bone.name == 0 then 
-									--	skinOps.addBone mesh.modifiers[#Skin] bone 0
+									if chk_populateBones.checked do (
+										skinOps.selectBoneByNode sk bone
+										local bnName = skinOps.GetBoneName sk (skinOps.GetSelectedBone sk) 0
+										if bnName != bone.name then 
+											skinops.addBone sk bone 0
+									)
 								)
 							)
 						)
@@ -224,7 +231,7 @@ rollout formNPDNoesisCMD "Noesis PAK v0.21" (
 					exit
 				)
 				
-				/*local copyNodes = #()
+				local copyNodes = #()
 				for obj in originalSelection where obj.modifiers[#Skin] != undefined do ( 
 					selectSkeleton obj
 					--Create dummy mesh with all bones in skin modifier so that FBX will save all bones
@@ -235,7 +242,7 @@ rollout formNPDNoesisCMD "Noesis PAK v0.21" (
 							skinops.addBone copyNodes[1].modifiers[#Skin] bn 0
 					selectmore lastSelection
 					exit
-				)*/
+				)
 				
 				if chk_showPlugOpt.checked then (--chk_expPrompt
 					exportFile fbx_path selectedOnly:true using:FBXEXP
@@ -261,7 +268,7 @@ rollout formNPDNoesisCMD "Noesis PAK v0.21" (
 						format "Deleted FBX file %" fbx_path
 					)
 				)
-				--if copyNodes[1] != undefined then delete copyNodes[1]
+				if copyNodes[1] != undefined then delete copyNodes[1]
 					
 				actionMan.executeAction 0 "40472" --open listener
 				

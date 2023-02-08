@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Uncharted 4 ".pak" plugin for Rich Whitehouse's Noesis
 #Authors: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v0.22 (February 8, 2023)'
+Version = 'v0.23 (February 8, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -46,6 +46,7 @@ class DialogOptions:
 		self.baseSkeleton = None
 		self.width = 600
 		self.height = 800
+		self.texDicts = None
 		self.gameName = gameName
 
 		dialog = None
@@ -73,6 +74,15 @@ def pakCheckType(data):
 	else: 
 		print("Fatal Error: Unknown file magic: " + str(hex(magic)))
 		return 0
+		
+def getGameName():
+	inName = rapi.getInputName().lower()
+	outName = rapi.getOutputName().lower()
+	if inName.find("\\thelostlegacy\\") != -1 or inName.find("tll") != -1:
+		return "TLL"
+	if inName.find("\\uncharted4\\") != -1 or inName.find("u4") != -1: 
+		return "U4"
+	return gameName
 
 def findNextOf(bs, integer, is64=False):
 	start = bs.tell()
@@ -475,15 +485,13 @@ def findRootDir(path):
 class openOptionsDialogWindow:
 	
 	def __init__(self, width=dialogOptions.width, height=dialogOptions.height, args=[]):
-		global dialogOptions, gameName
+		global dialogOptions
 		
 		self.width = width
 		self.height = height
 		self.pak = args.get("pak") or None
 		self.path = self.pak.path or rapi.getInputName()
 		self.name = rapi.getLocalFileName(self.path)
-		gameName = "TLL" if self.path.lower().find("\\thelostlegacy\\") != -1 else "U4"
-		
 		self.loadItems = [self.name]
 		self.localDir = rapi.getDirForFilePath(self.path)
 		self.localRoot = findRootDir(self.path)
@@ -1005,7 +1013,7 @@ class PakFile:
 		return []
 	
 	def readPakHeader(self):
-	
+		
 		print ("Reading", self.path or rapi.getInputName())
 		readPointerFixup = self.readPointerFixup
 		
@@ -1049,12 +1057,12 @@ class PakFile:
 		self.vramDicts = None
 		self.vrams = {}
 		
-		jsonPath = noesis.getPluginsPath() + "python\\" + gameName + "TextureHashes.json"
-		file = open(jsonPath)
-		try:
-			self.texDict = json.load(file) if file else {}
-		except:
-			print("Failed to load json", jsonPath)
+		file = open(noesis.getPluginsPath() + "python\\UC4TextureHashes.json")
+		#try:
+		dialogOptions.texDicts = dialogOptions.texDicts or (json.load(file) if file else {})
+		self.texDict = dialogOptions.texDicts[gameName]
+		#except:
+		#	print("Failed to load json", jsonPath)
 		
 		for p, pageEntry in enumerate(self.pakPageEntries):
 			
@@ -1483,6 +1491,10 @@ class PakFile:
 						else:
 							foundNormals = 2
 							rapi.rpgBindTangentBufferOfs(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_BYTE, 4, 0)
+							
+					#elif sd.type == 10:
+					#	rapi.rpgBindColorBufferOfs(bs.readBytes(8 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4, 0, 4)
+					
 					else:
 						print("Omitting vertex component type", sd.type, "found at", bs.tell())
 				
@@ -1538,7 +1550,7 @@ def pakLoadRGBA(data, texList):
 
 def pakLoadModel(data, mdlList):
 	
-	global dialogOptions
+	global dialogOptions, gameName
 	
 	noesis.logPopup()
 	print("\n\n	Naughty Dog PAK model import", Version, "by alphaZomega\n")
@@ -1548,6 +1560,7 @@ def pakLoadModel(data, mdlList):
 	ctx = rapi.rpgCreateContext()
 	
 	if not noDialog:
+		gameName = getGameName()
 		pak.readPakHeader()
 		dialog = openOptionsDialogWindow(None, None, {"pak":pak})
 		dialog.createPakWindow()
@@ -1612,11 +1625,12 @@ def pakLoadModel(data, mdlList):
 
 def pakWriteModel(mdl, bs):
 	
-	global pointerPageIds, pakPageEntries 
+	global pointerPageIds, pakPageEntries, gameName
 	
 	noesis.logPopup()
 	print("\n\n	Naughty Dog PAK model export", Version, "by alphaZomega\n")
 	texOnly = noesis.optWasInvoked("-t")
+	gameName = getGameName()
 	
 	def getExportName(fileName):		
 		if fileName == None:
@@ -1665,14 +1679,14 @@ def pakWriteModel(mdl, bs):
 	source.readPak()
 	
 	boneDict = {}
-	for i, bone in enumerate(source.boneList or mdl.bones):
+	for i, bone in enumerate(source.boneList):# or mdl.bones):
 		boneDict[bone.name] = i
 	
 	if source.submeshes:
 		
-		doWrite = False
+		doWrite = didAppend = False
 		lastLOD = 0
-		isNoesisSplit = (mdl.meshes[0].name[4] == "_" and mdl.meshes[0].name[0] == "0")
+		isNoesisSplit = (mdl.meshes[0].name[:5] == "0000_")
 		fbxMeshList = mdl.meshes if not isNoesisSplit else recombineNoesisMeshes(mdl)
 		
 		f.seek(source.geoOffset[0] + source.geoOffset[1] + 72)
@@ -1716,6 +1730,7 @@ def pakWriteModel(mdl, bs):
 				print("Found no submeshes to inject from FBX, copying original file...")
 			
 			if doWrite:
+				
 				for i, meshTuple in enumerate(meshesToInject):
 					
 					writeMesh = meshTuple[0]
@@ -1727,6 +1742,7 @@ def pakWriteModel(mdl, bs):
 					if not dialogOptions.doLODs and LODidx > 0:
 						continue
 					
+					appendedPositions = appendedWeights = appendedIndices = False
 					print("Injecting ", writeMesh.name)
 					
 					pageCt = readUIntAt(f, 16)
@@ -1739,61 +1755,63 @@ def pakWriteModel(mdl, bs):
 					
 					vertOffs = submeshesAddr + 176*i + 36
 					foundPositions = foundUVs = foundNormals = 0
+					appendedPositions = (len(writeMesh.positions) > sm.numVerts)
+					tempbs = wb if appendedPositions else bs
 					
 					for j, sd in enumerate(sm.streamDescs):
+						bs.seek(sd.offset)
 						
 						if ((j == 0 and sd.stride == 12 or sd.stride == 8)) and not foundPositions:
-							#print(i, "Writing positions at", wb.tell())
 							bFoundPositions = True
-							newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
+							if appendedPositions:
+								newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
 							if sd.stride == 12:
 								for v, vert in enumerate(writeMesh.positions):
-									wb.writeFloat(vert[0] * (1/GlobalScale))
-									wb.writeFloat(vert[1] * (1/GlobalScale))
-									wb.writeFloat(vert[2] * (1/GlobalScale))
+									tempbs.writeFloat(vert[0] * (1/GlobalScale))
+									tempbs.writeFloat(vert[1] * (1/GlobalScale))
+									tempbs.writeFloat(vert[2] * (1/GlobalScale))
 							elif sd.stride == 8:
 								for v, vert in enumerate(writeMesh.positions):
-									wb.writeHalfFloat(vert[0] * (1/GlobalScale))
-									wb.writeHalfFloat(vert[1] * (1/GlobalScale))
-									wb.writeHalfFloat(vert[2] * (1/GlobalScale))
-									wb.writeHalfFloat(0)
+									tempbs.writeHalfFloat(vert[0] * (1/GlobalScale))
+									tempbs.writeHalfFloat(vert[1] * (1/GlobalScale))
+									tempbs.writeHalfFloat(vert[2] * (1/GlobalScale))
+									tempbs.writeHalfFloat(0)
 						elif sd.type == 34 and (foundUVs < 2 or (dialogOptions.exportCopyUV3 or dialogOptions.nullUV3)):
 							foundUVs += 1
 							UVs = writeMesh.lmUVs if dialogOptions.exportCopyUV3 == 2 or foundUVs == 2 else writeMesh.uvs
-							#print(i, "Writing UV" + str(foundUVs) + " at", wb.tell())
-							newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
+							if appendedPositions:
+								newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
 							if foundUVs > 2 and dialogOptions.nullUV3:
 								print(i, "Nulling UV" + str(foundUVs) + " for", sm.name)
 								for v, vert in enumerate(UVs):
-									wb.writeHalfFloat(0)
-									wb.writeHalfFloat(0)
+									tempbs.writeHalfFloat(0)
+									tempbs.writeHalfFloat(0)
 							else:
 								for v, vert in enumerate(UVs):
-									wb.writeHalfFloat(vert[0])
-									wb.writeHalfFloat(vert[1])
+									tempbs.writeHalfFloat(vert[0])
+									tempbs.writeHalfFloat(vert[1])
 									
 						elif sd.type == 31:
 							foundNormals += 1
-							newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
+							if appendedPositions:
+								newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
 							if foundNormals == 1:
-								#print(i, "Writing Normals at", wb.tell())
 								for v, vert in enumerate(writeMesh.tangents): 
-									wb.writeByte(int(vert[0][0] * 127 + 0.5000000001)) #normal
-									wb.writeByte(int(vert[0][1] * 127 + 0.5000000001))
-									wb.writeByte(int(vert[0][2] * 127 + 0.5000000001))
-									wb.writeByte(0)
+									tempbs.writeByte(int(vert[0][0] * 127 + 0.5000000001)) #normal
+									tempbs.writeByte(int(vert[0][1] * 127 + 0.5000000001))
+									tempbs.writeByte(int(vert[0][2] * 127 + 0.5000000001))
+									tempbs.writeByte(0)
 							elif foundNormals == 2: 
 								foundNormals = 2
-								#print(i, "Writing Tangents at", wb.tell())
 								for v, vert in enumerate(writeMesh.tangents):
-									wb.writeByte(int(vert[2][0] * 127 + 0.5000000001)) #bitangent
-									wb.writeByte(int(vert[2][1] * 127 + 0.5000000001))
-									wb.writeByte(int(vert[2][2] * 127 + 0.5000000001))
+									tempbs.writeByte(int(vert[2][0] * 127 + 0.5000000001)) #bitangent
+									tempbs.writeByte(int(vert[2][1] * 127 + 0.5000000001))
+									tempbs.writeByte(int(vert[2][2] * 127 + 0.5000000001))
 									TNW = vert[0].cross(vert[1]).dot(vert[2])
 									if (TNW < 0.0):
-										wb.writeByte(129)
+										tempbs.writeByte(129)
 									else:
-										wb.writeByte(127)
+										tempbs.writeByte(127)
 						else:
 							print("Unknown component", sd.type, "!!")
 						'''elif sd.type == 10:
@@ -1813,34 +1831,55 @@ def pakWriteModel(mdl, bs):
 								print(i, "Skipped extra component type", sd.type, "found at", bs.tell())'''
 					
 					if sm.skinDesc:
+					
+						srcWeightCount = fbxWeightCount = 0
+						f.seek(sm.skinDesc.mapOffset)
+						for v in range(sm.numVerts):
+							srcWeightCount += f.readUInt()
+							f.seek(4,1)
+						for vertWeight in writeMesh.weights:
+							for w, weight in enumerate(vertWeight.weights):
+								if weight > 0: 
+									fbxWeightCount += 1
+						appendedWeights = (fbxWeightCount > srcWeightCount)
 						
 						runningOffset = boneID = 0
-						idxStart = wb.tell()
-						newPak.changePointerFixup(sm.skinDesc.mapOffsetAddr, idxStart, newPage)
-						for vertWeight in writeMesh.weights:
-							wb.writeUInt64(0)
-						wtStart = wb.tell()
-						newPak.changePointerFixup(sm.skinDesc.weightOffsetAddr, wtStart, newPage)
+						idxStart = wb.tell() if appendedWeights else sm.skinDesc.mapOffset
+						if appendedWeights:
+							newPak.changePointerFixup(sm.skinDesc.mapOffsetAddr, idxStart, newPage)
+							for vertWeight in writeMesh.weights:
+								wb.writeUInt64(0)
+							newPak.changePointerFixup(sm.skinDesc.weightOffsetAddr, wb.tell(), newPage)
+						wtStart = wb.tell() if appendedWeights else sm.skinDesc.weightsOffset
+						tempbs = wb if appendedWeights else bs
+						
 						for v, vertWeight in enumerate(writeMesh.weights):
-							wb.seek(idxStart + 8*v)
-							wb.writeUInt(len(vertWeight.weights))
-							wb.writeUInt(runningOffset)
-							wb.seek(wtStart + runningOffset)
+							tempbs.seek(idxStart + 8*v)
+							tempbs.writeUInt(len(vertWeight.weights))
+							tempbs.writeUInt(runningOffset)
+							tempbs.seek(wtStart + runningOffset)
 							for w, weight in enumerate(vertWeight.weights):
 								try:
 									boneID = boneDict[mdl.bones[vertWeight.indices[w]].name]
 								except:
+									print(mdl.bones[vertWeight.indices[w]].name, "not found")
 									pass
-								wb.writeUInt((boneID << 22) | int(weight * 4194303))
+								tempbs.writeUInt((boneID << 22) | int(weight * 4194303))
 								runningOffset += 4
 								
-							
-					newPak.changePointerFixup(sm.facesOffsetAddr, wb.tell(), newPage)
-					#print(i, "Writing indices at", wb.tell())
-					for k, idx in enumerate(writeMesh.indices):
-						wb.writeUShort(idx)
-						
-					while(wb.tell() % 16 != 0): 
+					
+					if len(writeMesh.indices) > sm.numIndices:
+						print(len(writeMesh.indices), "vs", sm.numIndices)
+						appendedIndices = True
+						newPak.changePointerFixup(sm.facesOffsetAddr, wb.tell(), newPage)
+						for k, idx in enumerate(writeMesh.indices):
+							wb.writeUShort(idx)
+					else:
+						bs.seek(sm.facesOffset)
+						for k, idx in enumerate(writeMesh.indices):
+							bs.writeUShort(idx)
+					
+					while (wb.tell() % 16 != 0): 
 						wb.writeByte(0)
 					wb.writeUInt64(0)
 					wb.writeUInt(0)
@@ -1849,6 +1888,12 @@ def pakWriteModel(mdl, bs):
 					if sm.nrmRecalcDesc:
 						#bs.seek(sm.nrmRecalcDesc[5])
 						#bs.writeUInt64(0)
+						'''bs.seek(sm.nrmRecalcDesc[0])
+						for k in range(sm.nrmRecalcDesc[4]):
+							bs.writeShort(0)
+						bs.seek(sm.nrmRecalcDesc[2])
+						for k in range(sm.nrmRecalcDesc[4]):
+							bs.writeShort(0)'''
 						bs.seek(sm.nrmRecalcDesc[1])
 						for k in range(sm.nrmRecalcDesc[4]):
 							bs.writeShort(0)
@@ -1860,6 +1905,16 @@ def pakWriteModel(mdl, bs):
 					bs.seek(vertOffs)
 					bs.writeUInt(len(writeMesh.positions))
 					bs.writeUInt(len(writeMesh.indices))
+					
+					didAppend = (didAppend or appendedPositions or appendedWeights or appendedIndices)
+					if appendedPositions or appendedWeights or appendedIndices:
+						print("Mesh must be appended to a new page: ", sm.name)
+						if appendedPositions:
+							print("	-exceeds the maximum vertex count of", sm.numVerts, "(has", str(len(writeMesh.positions)) + ")!")
+						if appendedWeights:
+							print("	-exceeds the maximum weight count of", srcWeightCount, "(has", str(fbxWeightCount) + ")!")
+						if appendedIndices:
+							print("	-exceeds the maximum poly count of", int(sm.numIndices/3), "(has", str(int(len(writeMesh.indices)/3)) + ")!")
 			if isNoesisSplit:
 				print("\nWARNING:	Duplicate mesh names detected! Check your FBX for naming or geometry issues. This pak may crash the game!\n")
 
@@ -1901,7 +1956,7 @@ def pakWriteModel(mdl, bs):
 							print("Texture was found, but is not in the pak file!\n	", fileName)
 							
 							
-		if doWrite:
+		if doWrite:# and didAppend:
 			if not isModded:
 				print("\nFile was not previously injected")
 				writeUIntAt(bs, 28, pointerFixupTblOffs+12)
