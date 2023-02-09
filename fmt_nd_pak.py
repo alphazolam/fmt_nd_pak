@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Uncharted 4 ".pak" plugin for Rich Whitehouse's Noesis
 #Authors: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v0.23 (February 8, 2023)'
+Version = 'v1.0 (February 9, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -48,7 +48,6 @@ class DialogOptions:
 		self.height = 800
 		self.texDicts = None
 		self.gameName = gameName
-
 		dialog = None
 
 dialogOptions = DialogOptions()
@@ -768,7 +767,7 @@ class openOptionsDialogWindow:
 			
 StreamDesc = namedtuple("StreamDesc", "type offset stride bufferOffsetAddr")
 
-SkinDesc = namedtuple("SkinDesc", "mapOffset weightsOffset mapOffsetAddr weightOffsetAddr")
+SkinDesc = namedtuple("SkinDesc", "mapOffset weightsOffset weightCount mapOffsetAddr weightOffsetAddr")
 
 PakEntry = namedtuple("PakEntry", "type offset")
 
@@ -1341,13 +1340,13 @@ class PakFile:
 				if skindataOffset:
 					bs.seek(skindataOffset)
 					uknSD0 = bs.readUInt()
-					uknSD1 = bs.readUInt()
+					numWeights = bs.readUInt()
 					uknSD2 = bs.readUInt()
 					uknSD3 = bs.readUInt()
 					bIndicesOffs = readPointerFixup()
 					weightsOffs = readPointerFixup()
 					
-					self.submeshes[i].skinDesc = SkinDesc(mapOffset=bIndicesOffs, weightsOffset=weightsOffs, mapOffsetAddr=bs.tell()-16, weightOffsetAddr=bs.tell()-8)
+					self.submeshes[i].skinDesc = SkinDesc(mapOffset=bIndicesOffs, weightsOffset=weightsOffs, weightCount=numWeights, mapOffsetAddr=bs.tell()-16, weightOffsetAddr=bs.tell()-8)
 				
 				
 				bs.seek(m_material)
@@ -1742,24 +1741,25 @@ def pakWriteModel(mdl, bs):
 					if not dialogOptions.doLODs and LODidx > 0:
 						continue
 					
-					appendedPositions = appendedWeights = appendedIndices = False
+					
 					print("Injecting ", writeMesh.name)
 					
 					pageCt = readUIntAt(f, 16)
 					pointerFixupPageCt = readUIntAt(bs, 24)
 					pointerFixupTblOffs = readUIntAt(bs, 28)
 					isModded = (readUIntAt(f, pointerFixupTblOffs + 12*8) == 4294967295)
+					appendedPositions = appendedWeights = appendedIndices = isModded #False
 					newPageDataAddr = source.pakPageEntries[len(source.pakPageEntries)-1][0] + source.pakPageEntries[len(source.pakPageEntries)-1][1]
 					newPage = pageCt if not isModded else pageCt-1
 					owningIndex = source.pakPageEntries[len(source.pakPageEntries)-1][2]
-					
 					vertOffs = submeshesAddr + 176*i + 36
 					foundPositions = foundUVs = foundNormals = 0
-					appendedPositions = (len(writeMesh.positions) > sm.numVerts)
+					appendedPositions = (len(writeMesh.positions) > sm.numVerts) or appendedPositions #and (not isModded or (source.getPointerFixupPage(sm.streamDescs[0].bufferOffsetAddr) < pageCt-1))
 					tempbs = wb if appendedPositions else bs
 					
 					for j, sd in enumerate(sm.streamDescs):
 						bs.seek(sd.offset)
+						bufferStart = tempbs.tell()
 						
 						if ((j == 0 and sd.stride == 12 or sd.stride == 8)) and not foundPositions:
 							bFoundPositions = True
@@ -1776,6 +1776,7 @@ def pakWriteModel(mdl, bs):
 									tempbs.writeHalfFloat(vert[1] * (1/GlobalScale))
 									tempbs.writeHalfFloat(vert[2] * (1/GlobalScale))
 									tempbs.writeHalfFloat(0)
+									
 						elif sd.type == 34 and (foundUVs < 2 or (dialogOptions.exportCopyUV3 or dialogOptions.nullUV3)):
 							foundUVs += 1
 							UVs = writeMesh.lmUVs if dialogOptions.exportCopyUV3 == 2 or foundUVs == 2 else writeMesh.uvs
@@ -1812,6 +1813,7 @@ def pakWriteModel(mdl, bs):
 										tempbs.writeByte(129)
 									else:
 										tempbs.writeByte(127)
+							
 						else:
 							print("Unknown component", sd.type, "!!")
 						'''elif sd.type == 10:
@@ -1829,19 +1831,22 @@ def pakWriteModel(mdl, bs):
 								print(i, "Skipped extra normals/tangents buffer", sd.type, "found at", bs.tell())
 							else:
 								print(i, "Skipped extra component type", sd.type, "found at", bs.tell())'''
+								
+						if tempbs.tell() - bufferStart > 0:
+							writeUIntAt(bs, sd.bufferOffsetAddr - 12, tempbs.tell()-bufferStart)
 					
 					if sm.skinDesc:
 					
-						srcWeightCount = fbxWeightCount = 0
-						f.seek(sm.skinDesc.mapOffset)
-						for v in range(sm.numVerts):
-							srcWeightCount += f.readUInt()
-							f.seek(4,1)
-						for vertWeight in writeMesh.weights:
+						fbxWeightCount = 0
+						trueWeightCounts = []
+						for v, vertWeight in enumerate(writeMesh.weights):
+							trueWeightCounts.append(0)
 							for w, weight in enumerate(vertWeight.weights):
 								if weight > 0: 
 									fbxWeightCount += 1
-						appendedWeights = (fbxWeightCount > srcWeightCount)
+									trueWeightCounts[v] += 1
+									
+						appendedWeights = (fbxWeightCount > sm.skinDesc.weightCount) or appendedWeights
 						
 						runningOffset = boneID = 0
 						idxStart = wb.tell() if appendedWeights else sm.skinDesc.mapOffset
@@ -1855,18 +1860,19 @@ def pakWriteModel(mdl, bs):
 						
 						for v, vertWeight in enumerate(writeMesh.weights):
 							tempbs.seek(idxStart + 8*v)
-							tempbs.writeUInt(len(vertWeight.weights))
+							tempbs.writeUInt(trueWeightCounts[v])
 							tempbs.writeUInt(runningOffset)
 							tempbs.seek(wtStart + runningOffset)
 							for w, weight in enumerate(vertWeight.weights):
-								try:
-									boneID = boneDict[mdl.bones[vertWeight.indices[w]].name]
-								except:
-									print(mdl.bones[vertWeight.indices[w]].name, "not found")
-									pass
-								tempbs.writeUInt((boneID << 22) | int(weight * 4194303))
-								runningOffset += 4
-								
+								if weight > 0:
+									try:
+										boneID = boneDict[mdl.bones[vertWeight.indices[w]].name]
+									except:
+										print("Bone weight ID", w, mdl.bones[vertWeight.indices[w]].name, "not found in pak skeleton")
+									tempbs.writeUInt((boneID << 22) | int(weight * 4194303))
+									runningOffset += 4
+						
+						writeUIntAt(bs, sm.skinDesc.mapOffsetAddr-12, int(runningOffset/4))
 					
 					if len(writeMesh.indices) > sm.numIndices:
 						print(len(writeMesh.indices), "vs", sm.numIndices)
@@ -1907,12 +1913,12 @@ def pakWriteModel(mdl, bs):
 					bs.writeUInt(len(writeMesh.indices))
 					
 					didAppend = (didAppend or appendedPositions or appendedWeights or appendedIndices)
-					if appendedPositions or appendedWeights or appendedIndices:
-						print("Mesh must be appended to a new page: ", sm.name)
+					if not isModded and (appendedPositions or appendedWeights or appendedIndices):
+						print("Mesh will be appended to a new page: ", sm.name)
 						if appendedPositions:
 							print("	-exceeds the maximum vertex count of", sm.numVerts, "(has", str(len(writeMesh.positions)) + ")!")
 						if appendedWeights:
-							print("	-exceeds the maximum weight count of", srcWeightCount, "(has", str(fbxWeightCount) + ")!")
+							print("	-exceeds the maximum weight count of", sm.skinDesc.weightCount, "(has", str(fbxWeightCount) + ")!")
 						if appendedIndices:
 							print("	-exceeds the maximum poly count of", int(sm.numIndices/3), "(has", str(int(len(writeMesh.indices)/3)) + ")!")
 			if isNoesisSplit:
@@ -1977,7 +1983,7 @@ def pakWriteModel(mdl, bs):
 					bs.seek(8, 1)
 					
 			else:
-				print("\nFile was previously injected")
+				print("\nFile was previously injected. It is recommended to inject an unedited pak file")
 			
 			#pointerFixupPageCt = readUIntAt(bs, 24)
 			ns = NoeBitStream()
