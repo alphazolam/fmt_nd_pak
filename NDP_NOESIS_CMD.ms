@@ -1,5 +1,5 @@
 --Naughty Dog PAK Noesis CMD tool
---Version: v0.22
+--Version: v0.23
 --Last Release: February 8 2023
 --Created by: alphaZomega 
 
@@ -39,16 +39,18 @@ fn selectSkeleton node = (
 )
 
 try(destroydialog formNPDNoesisCMD; clearlistener())catch()
-rollout formNPDNoesisCMD "Noesis PAK v0.22" (
+rollout formNPDNoesisCMD "Noesis PAK v0.23" (
 	group "Import" (
 		button btn_import "Import To Scene" align:#center
 		checkbox chk_legacyFBX "Use Legacy FBX" checked:false align:#left tooltip:"Import as FBX 2014"
 		checkbox chk_rpgOptimize "Optimize" checked:true align:#left tooltip:"Have Noesis automatically remove duplicate vertices on import"
 		checkbox chk_folder "Import Folder" checked:false align:#left
-		checkbox chk_populateBones "Populate Bones Lists" checked:true align:#left tooltip:"Populate the bones list of every Skin modifier to have all bones"
+		checkbox chk_populateBones "Populate Bones Lists" checked:false align:#left tooltip:"Populate the bones list of every Skin modifier to have all bones"
 	)
 	group "Export" (
 		button btn_export "Export To Game" align:#center
+		checkbox chk_writeBones "Write Bone Positions" checked:false align:#left
+		checkbox chk_texOnly "Inject Textures Only" checked:false align:#left
 	)
 	group "Utilities" (
 		--button BtnSkinOnTop "Move Skin to Top of Stack" align:#center 
@@ -254,6 +256,8 @@ rollout formNPDNoesisCMD "Noesis PAK v0.22" (
 					waitForFileUnlock(fbx_path)
 					cmd = (
 						"\"" + noesis_path + "\" ?cmode \"" + fbx_path + "\" \"" + out_path + "\"" \
+						+ (if chk_writeBones.checked then " -bones" else "") \
+						+ (if chk_texOnly.checked then " -t" else "") \
 						+ (" -meshfile \"" + cmd + "\"") \
 					)
 					if chk_showCMD.checked then (
