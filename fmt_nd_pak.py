@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Uncharted 4 ".pak" plugin for Rich Whitehouse's Noesis
 #Authors: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v1.1 (February 11, 2023)'
+Version = 'v1.11 (February 11, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -740,7 +740,7 @@ class openOptionsDialogWindow:
 				self.loadAllTexCheckbox.setChecked(dialogOptions.loadAllTextures)
 				
 				
-				index = self.noeWnd.createCheckBox("Convert Textures", 10, 695, 160, 30, self.checkConvTexCheckbox)
+				index = self.noeWnd.createCheckBox("Convert Textures", 10, 695, 130, 30, self.checkConvTexCheckbox)
 				self.convTexCheckbox = self.noeWnd.getControlByIndex(index)
 				self.convTexCheckbox.setChecked(dialogOptions.doConvertTex)
 				
@@ -957,15 +957,13 @@ class PakFile:
 	
 	def loadVRAM(self, vramOffset=0, exTexName=""):
 		
-		if dialogOptions.doConvertTex and exTexName.find("_NoesisBrown") != -1: 
+		if dialogOptions.doConvertTex and exTexName.find("NoesisBrown") != -1: 
 			return generateDummyTexture4px([32, 26, 18, 255], exTexName)
-		elif dialogOptions.doConvertTex and exTexName.find("_NoesisGray") != -1: 
+		elif dialogOptions.doConvertTex and exTexName.find("NoesisGray") != -1: 
 			return generateDummyTexture4px([127, 127, 127, 255], exTexName)
-		elif dialogOptions.doConvertTex and exTexName.find("_NoesisWhite") != -1: 
+		elif dialogOptions.doConvertTex and exTexName.find("NoesisWhite") != -1: 
 			return generateDummyTexture4px([255, 255, 255, 255], exTexName)
-		elif dialogOptions.doConvertTex and exTexName.find("_NoesisNRMMetal") != -1: 
-			return generateDummyTexture4px([127, 127, 254, 255], exTexName)
-		elif dialogOptions.doConvertTex and exTexName.find("_NoesisNRM") != -1: 
+		elif dialogOptions.doConvertTex and exTexName.find("NoesisNRM") != -1: 
 			return generateDummyTexture4px([127, 127, 254, 255], exTexName)
 
 		
@@ -1219,6 +1217,7 @@ class PakFile:
 			boneNames = []
 			self.boneDict = []
 			self.boneMap = []
+			oldBoneNames = [bone.name for bone in self.boneList]
 			
 			bs.seek(namesOffset)
 			for b in range(boneCount):
@@ -1241,6 +1240,7 @@ class PakFile:
 				mainBoneMats.append(mat)
 			
 			for b in range(boneCount):
+				
 				if b in self.boneMap:
 					self.boneList.append(NoeBone(startBoneIdx + b, boneNames[b], mainBoneMats[self.boneMap.index(b)], None, parentList[b][1]))
 				else:
@@ -1264,17 +1264,14 @@ class PakFile:
 				if lastBone.parentIndex != -1:
 					lastBone.parentIndex += startBoneIdx
 				elif b not in self.boneMap:
-					lastBone.parentIndex = 0 #parent stragglers to root
-				#print(lastBone.index, lastBone.name, lastBone.parentIndex, lastBone.parentName)
-			
-			'''for b, bone in enumerate(self.boneList):
-				matrix = bone.getMatrix()
-				if matrix == identity and :
-					print(bone.name, parentList[b][3])
-					matrix = self.boneList[].getMatrix()
-					bone.setMatrix(matrix)'''
-				
-			#rapi.rpgSetBoneMap(self.boneMap)
+					if lastBone.name == "eyelash_grp" and "heada" in boneNames:
+						lastBone.parentIndex = boneNames.index("heada") + startBoneIdx
+					else:	
+						lastBone.parentIndex = 0 #parent stragglers to root
+						
+				'''if b == 0 and len(self.boneList) > 0 and self.path.lower().find("-hair") != -1 and "heada" in oldBoneNames:
+					lastBone.parentIndex = oldBoneNames.index("heada")
+					lastBone.setMatrix(identity)'''
 			
 		if self.geoOffset:
 			start = self.geoOffset[1]
@@ -1468,10 +1465,10 @@ class PakFile:
 								
 								if dialogOptions.doConvertTex:
 									if not loadedNormal:
-										self.vrams[vramHash][2].append(texFileName.replace(".dds", "_NoesisNRM.dds"))
+										self.vrams[vramHash][2].append("NoesisNRM.dds")
 										material.setNormalTexture(self.vrams[vramHash][2][len(self.vrams[vramHash][2])-1])
 									if not loadedDiffuse:
-										self.vrams[vramHash][2].append(texFileName.replace(".dds", "_NoesisBrown.dds"))
+										self.vrams[vramHash][2].append("NoesisBrown.dds")
 										material.setTexture(self.vrams[vramHash][2][len(self.vrams[vramHash][2])-1])
 									
 							elif not loadedSpec and name.find("pecular") != -1:
@@ -1485,10 +1482,10 @@ class PakFile:
 								materialFlags |=   noesis.NMATFLAG_PBR_METAL | noesis.NMATFLAG_PBR_ROUGHNESS_NRMALPHA
 								material.setMetal(1.0, 1.0)
 								#material.setDefaultBlend(0)
-								self.vrams[vramHash][2].append(texFileName.replace(".dds", "_NoesisWhite.dds"))
+								self.vrams[vramHash][2].append("NoesisWhite.dds")
 								material.setTexture(self.vrams[vramHash][2][len(self.vrams[vramHash][2])-1])
 								if not loadedNormal:
-									self.vrams[vramHash][2].append(texFileName.replace(".dds", "_NoesisNRM.dds"))
+									self.vrams[vramHash][2].append("NoesisNRM.dds")
 									material.setNormalTexture(self.vrams[vramHash][2][len(self.vrams[vramHash][2])-1])
 								
 						doSet = doSet or dialogOptions.loadAllTextures
@@ -1553,12 +1550,13 @@ class PakFile:
 			lastLOD = 0
 			
 			if dialogOptions.doLoadTex:
+				alreadyLoadedList = [tex.name for tex in self.texList]
 				for vramHash in self.vramHashes:
 					tex = self.loadVRAM(self.vrams[vramHash][0])
-					if tex:  
+					if tex and tex.name not in alreadyLoadedList:  
 						self.texList.append(tex)
+						alreadyLoadedList.append(tex.name)
 					# Load separated channel textures and dummy textures:
-					alreadyLoadedList = []
 					if self.vrams[vramHash][2]: 
 						for texName in self.vrams[vramHash][2]:
 							if texName not in alreadyLoadedList:
@@ -1568,12 +1566,12 @@ class PakFile:
 									alreadyLoadedList.append(tex.name)
 				
 				if dialogOptions.loadAllTextures:
-					alreadyLoadedList = [tex.name for tex in self.texList]
 					for hash, subTuple in self.vrams.items():
 						if subTuple[1] and subTuple[1] not in alreadyLoadedList:
 							tex = self.loadVRAM(subTuple[0])
 							if tex:  
 								self.texList.append(tex)
+								alreadyLoadedList.append(tex.name)
 								
 			for i, sm in enumerate(self.submeshes):
 				lodFind = sm.name.find("Shape")
@@ -1748,9 +1746,9 @@ def pakLoadModel(data, mdlList):
 				mdl.setBones(pak.boneList)
 				
 		if pak.userStreams:
-			meshNamesList = [mesh.name for mesh in mdl.meshes]
 			for meshIdx, userStreamList in pak.userStreams.items():
-				mdl.meshes[meshIdx].setUserStreams(userStreamList)
+				if userStreamList and meshIdx < len(mdl.meshes):
+					mdl.meshes[meshIdx].setUserStreams(userStreamList)
 		
 	return 1
 
