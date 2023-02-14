@@ -13,7 +13,7 @@ Support for games beyond Uncharted 4 is also possible in the future.
 ## Installation
 1. Download and install [Noesis](https://richwhitehouse.com/index.php?content=inc_projects.php&showproject=91)
 
-2. Place 'fmt_nd_pak.py', 'U4TextureHashes.json' and 'TLLTextureHashes.json' into your Noesis\Plugins\Python\ folder
+2. Place 'fmt_nd_pak.py' and 'UC4TextureHashes.json' into your Noesis\Plugins\Python\ folder
 
 3. (Optional) Edit 'fmt_nd_pak.py' to point to the location of your extracted game files (directory containing 'Actor77', 'texturedict2' etc folders). Make sure the path has double slashes ("\\\\"s instead of "\\\"s)
 
@@ -38,6 +38,7 @@ Using 'Export From Preview' on a model that has had its textures loaded will sav
 
 #### MANY MODELS DO NOT HAVE BONES IN THEIR OWN PAK
 The "Base Skeleton" for most characters and many weapons is in a file that's name ends in '-base.pak'. Noesis will attempt to find these files automatically from inside your specified BaseDirectory. You'll need to skeleton in order to import the rigging properly.
+If you get an import error about an out-of-range bone index, it is probably from loading the wrong base skeleton.
 
 You can load multiple files at once using the plugin's GUI window, and select the skeletal base. It will attempt to merge all selected paks together into the same preview scene, which you can then extract as FBX
 
@@ -46,7 +47,7 @@ You can load multiple files at once using the plugin's GUI window, and select th
 - Load Textures: 	  	Load textures onto the model
 - Load Base (Skeleton):	Attempt to load a base skeleton for every rigged model missing bones
 - Import LODs:		  	Load lower detail LODs onto the model. Lower detail LODs will be disabled on exported paks with this option enabled
-- Convert Textures:	  	Convert normal maps to put normal X in the red channel and normal Y in the green channel (standard format)
+- Convert Textures:	  	Convert normal maps to put normal X in the red channel and normal Y in the green channel (standard format). Also separates Occlusion maps from Normal maps and assigns them in Noesis preview.
 - Load All Textures:	Allows you to extract every texture in a pak, rather than just diffuse, transparency and normal maps
 - Game :				This menu lets you pick between using HD textures/skeletons from Uncharted 4 or The Lost Legacy, along with setting which one's Base Directory is used	
 - View: 				This menu lets you pick between viewing files / folders from the directory of the opened file or from the extracted Base Directory of your selected Game
@@ -55,8 +56,8 @@ You can load multiple files at once using the plugin's GUI window, and select th
 Once you have edited a model in your 3D program, you can inject it back into a copy of the same pak file it came from using Noesis 'File -> Export -> .pak - Naughty Dog PAK'
 The resulting file will be injected with the new geometry and should work, but many cases have not been tested yet.
 
-- Attempting to inject a model where any of the submeshes have more polygons, more vertices or more bone weights than the original will fail, as the injector does not attempt to create new space for that.
-- It is best to keep an original copy of the mesh you are injecting and inject that copy every time. Avoid injecting an already-injected file
+- You can now inject submeshes with up to 60,000 vertices, however it is advisable to keep submeshes at lower vertex counts than that as each "page" in the pak file is only capable of holding 1MB of data, and 60k vertices of complex rigging on one submesh can add up to more than that
+- It is best to keep an original copy of the mesh you are injecting and inject that copy every time. *Avoid injecting an already-injected file*
 
 #### SUBMESHES IN YOUR FBX MUST HAVE THE SAME NAMES AS SUBMESHES FROM THE ORIGINAL PAK TO BE INJECTED, otherwise they will be ignored.
 

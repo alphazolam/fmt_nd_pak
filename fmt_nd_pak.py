@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Uncharted 4 ".pak" plugin for Rich Whitehouse's Noesis
 #Authors: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v1.11 (February 11, 2023)'
+Version = 'v1.2 (February 14, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -135,6 +135,17 @@ def generateDummyTexture4px(rgbaColor, name="Dummy"):
 	imageData = rapi.imageDecodeRaw(imageData, 4, 4, "r8g8b8a8")
 	
 	return NoeTexture(name, 4, 4, imageData, noesis.NOESISTEX_RGBA32)	
+	
+def mergeChannelsRGBA(sourceBytes, sourceChannel, sourceWidth, sourceHeight, targetBytes, targetChannel, targetWidth, targetHeight):
+	resizedSourceBytes = rapi.imageResample(sourceBytes, sourceWidth, sourceHeight, targetWidth, targetHeight)
+	#resizedSourceBytes = rapi.imageEncodeRaw(resizedSourceBytes, targetWidth, targetHeight, "r8g8b8a8")
+	#resizedSourceBytes = rapi.imageDecodeRaw(resizedSourceBytes, targetWidth, targetHeight, "r8g8b8a8")
+	outputTargetBytes = copy.copy(targetBytes)
+	for i in range(int(len(resizedSourceBytes)/16)):
+		for b in range(4):
+			outputTargetBytes[i*16 + b*4 + targetChannel] = resizedSourceBytes[i*16 + b*4 + sourceChannel]
+	
+	return outputTargetBytes
 
 def encodeImageData(data, width, height, fmt):
 	outputData = NoeBitStream()
@@ -165,7 +176,7 @@ def recombineNoesisMeshes(mdl):
 		meshesBySourceName[mesh.sourceName].append(mesh)
 		
 	combinedMeshes = []
-	for name, meshList in meshesBySourceName.items():
+	for sourceName, meshList in meshesBySourceName.items():
 		newPositions = []
 		newUV1 = []
 		newUV2 = []
@@ -176,8 +187,8 @@ def recombineNoesisMeshes(mdl):
 		newColors = []
 		for mesh in meshList:
 			tempIndices = []
-			for i in range(len(mesh.indices)):
-				tempIndices.append(mesh.indices[i] + len(newPositions))
+			for index in mesh.indices:
+				tempIndices.append(index + len(newPositions))
 			newPositions.extend(mesh.positions)
 			newUV1.extend(mesh.uvs)
 			newUV2.extend(mesh.lmUVs)
@@ -194,7 +205,10 @@ def recombineNoesisMeshes(mdl):
 		combinedMesh.setUVs(newUV2, 1)
 		combinedMesh.setUVs(newUV3, 2)
 		combinedMesh.setColors(newColors)
-		combinedMeshes.append(combinedMesh)
+		if len(combinedMesh.positions) > 65535:
+			print("Warning: Mesh exceeds the maximum of 65535 vertices (has", str(len(combinedMesh.positions)) + "):\n	", combinedMesh.name)
+		else:
+			combinedMeshes.append(combinedMesh)
 		
 	return combinedMeshes
 
@@ -1124,7 +1138,7 @@ class PakFile:
 					texHash = bs.readUInt64()
 					texPath = readStringAt(bs, m_resItemOffset + start + 112)
 					texName = rapi.getLocalFileName(texPath[:texPath.find(".tga")+4]).replace(".ndb", "").replace(".tga", ".dds")
-					self.vrams[texHash] = [m_resItemOffset + start, texName, []]
+					self.vrams[texHash] = [m_resItemOffset + start, texName, [], None]
 					
 					if getattr(self, "vramDicts") and texHash not in self.vramDicts[key]:
 						self.vramDicts[key][texHash] = m_resItemOffset + start + self.startAddr
@@ -1264,14 +1278,10 @@ class PakFile:
 				if lastBone.parentIndex != -1:
 					lastBone.parentIndex += startBoneIdx
 				elif b not in self.boneMap:
-					if lastBone.name == "eyelash_grp" and "heada" in boneNames:
-						lastBone.parentIndex = boneNames.index("heada") + startBoneIdx
+					if lastBone.name == "eyelash_grp" and "headb" in boneNames:
+						lastBone.parentIndex = boneNames.index("headb") + startBoneIdx
 					else:	
 						lastBone.parentIndex = 0 #parent stragglers to root
-						
-				'''if b == 0 and len(self.boneList) > 0 and self.path.lower().find("-hair") != -1 and "heada" in oldBoneNames:
-					lastBone.parentIndex = oldBoneNames.index("heada")
-					lastBone.setMatrix(identity)'''
 			
 		if self.geoOffset:
 			start = self.geoOffset[1]
@@ -1425,9 +1435,10 @@ class PakFile:
 				if not material:
 					rapi.setPreviewOption("autoLoadNonDiffuse", "1")
 					material = NoeMaterial(matKey, "")
-					materialFlags = 0
+					#materialFlags = 0
 					material.setDefaultBlend(0)
-					loadedDiffuse = loadedNormal = loadedTrans = loadedSpec = loadedMetal = False
+					material.setSpecularColor(NoeVec4([0.5, 0.5, 0.5, 32.0])) 
+					loadedDiffuse = loadedNormal = loadedTrans = loadedSpec = loadedMetal = loadedRoughness = False
 					
 					for j in range(texCount):
 						bs.seek(texDescsListOffs + 40*j)
@@ -1439,29 +1450,28 @@ class PakFile:
 						vramHash = bs.readUInt64()
 						
 						texFileName = rapi.getLocalFileName(path[:path.find(".tga")+4]).replace(".tga", ".dds")
-						tex = doSet = None
+						doSet = False
 						
-						if texFileName:
-							if not loadedDiffuse and name.find("BaseColor") != -1:
-								doSet =  True 
-								loadedDiffuse = (name.find("BaseColor0") != -1)
+						if texFileName and name.find("01") != -1:
+							if not loadedDiffuse and name.find("BaseColor01") != -1:
+								doSet = loadedDiffuse = vramHash 
 								material.setTexture(texFileName)
 								
 							elif not loadedNormal and (name.find("Normal01") != -1 or name.find("NR") != -1):
-								doSet = loadedNormal = True
+								doSet = loadedNormal = vramHash
 								material.setNormalTexture(texFileName)
 								if dialogOptions.doConvertTex:
-									materialFlags |= noesis.NMATFLAG_NORMALMAP_FLIPY #| noesis.NMATFLAG_NORMALMAP_NODERZ
+									material.flags |= noesis.NMATFLAG_NORMALMAP_FLIPY #| noesis.NMATFLAG_NORMALMAP_NODERZ
 									
 									if name.find("NR") != -1 and texFileName.find("-ao") != -1: # Ambient Occlusion
 										self.vrams[vramHash][2].append(texFileName.replace(".dds", "_NoesisAO.dds"))
 										material.setOcclTexture(self.vrams[vramHash][2][len(self.vrams[vramHash][2])-1])
 								
 							elif not loadedTrans and name.find("Transparency01") != -1:
-								doSet = loadedTrans = True
+								doSet = loadedTrans = vramHash
 								material.setOpacityTexture(texFileName)
 								material.setAlphaTest(0.05)
-								materialFlags |= noesis.NMATFLAG_TWOSIDED
+								material.flags |= noesis.NMATFLAG_TWOSIDED
 								
 								if dialogOptions.doConvertTex:
 									if not loadedNormal:
@@ -1472,21 +1482,33 @@ class PakFile:
 										material.setTexture(self.vrams[vramHash][2][len(self.vrams[vramHash][2])-1])
 									
 							elif not loadedSpec and name.find("pecular") != -1:
-								doSet = loadedSpec = True
+								doSet = loadedSpec = vramHash
 								material.setSpecularTexture(texFileName)
-								material.setSpecularColor(NoeVec4([0.5, 0.5, 0.5, 32.0])) 
-								#materialFlags |=   noesis.NMATFLAG_PBR_SPEC
+								#material.flags |= noesis.NMATFLAG_PBR_SPEC
 								
-							elif dialogOptions.doConvertTex and not loadedDiffuse and not loadedMetal and (name.find("_RO_BC") != -1 or name.find("Roughness01") != -1):
-								doSet = loadedMetal = True
-								materialFlags |=   noesis.NMATFLAG_PBR_METAL | noesis.NMATFLAG_PBR_ROUGHNESS_NRMALPHA
-								material.setMetal(1.0, 1.0)
-								#material.setDefaultBlend(0)
-								self.vrams[vramHash][2].append("NoesisWhite.dds")
-								material.setTexture(self.vrams[vramHash][2][len(self.vrams[vramHash][2])-1])
-								if not loadedNormal:
-									self.vrams[vramHash][2].append("NoesisNRM.dds")
-									material.setNormalTexture(self.vrams[vramHash][2][len(self.vrams[vramHash][2])-1])
+						'''if dialogOptions.doConvertTex and not loadedSpec :
+							if  (name.find("LinearBlend0") != -1 or name.find("ME") != -1): #not loadedMetal and
+								if not loadedRoughness:
+									doSet = loadedMetal = vramHash
+									material.setSpecularTexture(texFileName)
+									material.setSpecularSwizzle( NoeMat44([[0, 0, 1, 0], [1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 1]]) )
+								elif loadedRoughness != vramHash:
+									self.vrams[loadedRoughness][2].append([vramHash, 0, 0]) #copy red channel of this texture to red channel of roughness texture (which has been set as specular)
+								else:
+									material.setRoughness(0.75, 0.0)
+								material.flags |= noesis.NMATFLAG_PBR_SPEC_IR_RG | noesis.NMATFLAG_PBR_METAL
+								material.setMetal(0.5, 0.0)
+								
+							if not loadedRoughness and (name.find("Curvature0") != -1 or name.find("RO") != -1):
+								if not loadedMetal:
+									doSet = loadedRoughness = vramHash
+									material.setSpecularTexture(texFileName)
+								elif loadedMetal != vramHash:
+									self.vrams[loadedMetal][2].append([vramHash, 0, 1])  #copy red channel of this texture to green channel of metal texture (which has been set as specular)
+								else:
+									material.setMetal(0.0, 0.0)
+								material.flags |= noesis.NMATFLAG_PBR_SPEC_IR_RG | noesis.NMATFLAG_PBR_METAL
+								material.setRoughness(0.75, 0.5)'''
 								
 						doSet = doSet or dialogOptions.loadAllTextures
 						
@@ -1512,26 +1534,26 @@ class PakFile:
 						else:
 							outstring = outstring + "\n	" +  name + ":  " + str(params[name])
 						lowerName = name.lower()
-						if numFloats==3 and not setBaseColor and not material.texName and lowerName.find("basecolor") != -1:
-							setBaseColor = True
-							material.setDiffuseColor(params[name])
-						elif numFloats==1 and not setSpecScale and lowerName.find("spec") != -1 :
-							setSpecScale = True
-							material.setSpecularColor(NoeVec4([0.5*params[name][0], 0.5*params[name][0], 0.5*params[name][0], 32.0]))
-						elif numFloats==1 and not setRoughness and lowerName.find("roughness") != -1:
-							setRoughness = True
-							material.setRoughness(params[name], 1.0)
-						elif numFloats==1 and not setMetal and lowerName.find("metal") != -1:
-							setMetal = True
-							material.setMetal(params[name], 1)
+						if True: #lowerName.find("01") != -1:
+							if numFloats==3 and not setBaseColor and not material.texName and lowerName.find("basecolor") != -1:
+								setBaseColor = True
+								material.setDiffuseColor(params[name])
+							elif numFloats==1 and not setSpecScale and not loadedMetal and not loadedRoughness and lowerName.find("spec") != -1 :
+								setSpecScale = True
+								material.setSpecularColor(NoeVec4([0.5*params[name][0], 0.5*params[name][0], 0.5*params[name][0], 32.0]))
+							elif numFloats==1 and not setRoughness and lowerName.find("roughness") != -1:
+								setRoughness = True
+								material.setRoughness(params[name][0], 0.5)
+							elif numFloats==1 and not setMetal and lowerName.find("metal") != -1:
+								setMetal = True
+								material.setMetal(params[name][0], 0.0)
 					
 					if dialogOptions.printMaterialParams:
 						print(outstring, "\n")
 						
-					if not material.texName and ((not loadedNormal and not loadedTrans and not loadedSpec and not setBaseColor) or matKey.find("lens") != -1):
+					if dialogOptions.doConvertTex and not material.texName and ((not loadedNormal and not loadedTrans and not loadedSpec and not setBaseColor) or matKey.find("lens") != -1):
 						material.setSkipRender(True)
 					
-					material.setFlags(materialFlags)
 					usedMaterials[m_material] = material
 					self.matList.append(material)
 					
@@ -1556,17 +1578,23 @@ class PakFile:
 					if tex and tex.name not in alreadyLoadedList:  
 						self.texList.append(tex)
 						alreadyLoadedList.append(tex.name)
-					# Load separated channel textures and dummy textures:
+					
+					# Load separated channel textures and dummy textures, or merge metal+roughness into specular:
 					if self.vrams[vramHash][2]: 
-						for texName in self.vrams[vramHash][2]:
-							if texName not in alreadyLoadedList:
-								tex = self.loadVRAM(self.vrams[vramHash][0], texName)
-								if tex:
-									self.texList.append(tex)
-									alreadyLoadedList.append(tex.name)
+						for texNameOrList in self.vrams[vramHash][2]:
+							if isinstance(texNameOrList, list):
+								print("Found merge hash", texNameOrList[0], "for", tex.name)
+								channelTex = self.loadVRAM(self.vrams[texNameOrList[0]][0])
+								tex.pixelData = mergeChannelsRGBA(channelTex.pixelData, texNameOrList[1], channelTex.width, channelTex.height, tex.pixelData, texNameOrList[2], tex.width, tex.height)
+								
+							elif texNameOrList not in alreadyLoadedList:
+								dummyTex = self.loadVRAM(self.vrams[vramHash][0], texNameOrList)
+								if dummyTex:
+									self.texList.append(dummyTex)
+									alreadyLoadedList.append(dummyTex.name)
 				
 				if dialogOptions.loadAllTextures:
-					for hash, subTuple in self.vrams.items():
+					for vramHash, subTuple in self.vrams.items():
 						if subTuple[1] and subTuple[1] not in alreadyLoadedList:
 							tex = self.loadVRAM(subTuple[0])
 							if tex:  
@@ -1742,6 +1770,11 @@ def pakLoadModel(data, mdlList):
 		
 		if pak.boneList:
 			pak.boneList = rapi.multiplyBones(pak.boneList)
+			if dialog and len(dialog.loadItems) > 1:
+				for bone in pak.boneList:
+					if bone.name.find("root_hair") != -1:
+						bone.parentName = "headb" 
+						break
 			for mdl in mdlList:
 				mdl.setBones(pak.boneList)
 				
@@ -1808,8 +1841,12 @@ def pakWriteModel(mdl, bs):
 	source.readPak()
 	
 	boneDict = {}
-	for i, bone in enumerate(source.boneList):# or mdl.bones):
-		boneDict[bone.name] = i
+	if not texOnly or (noesis.optWasInvoked("-bones") and (source.basePak or newPak).jointOffset):
+		try:
+			for i, bone in enumerate(source.boneList):# or mdl.bones):
+				boneDict[bone.name] = i
+		except:
+			print("ERROR: Could not load base skeleton")
 	
 	if source.submeshes:
 		
@@ -1823,7 +1860,6 @@ def pakWriteModel(mdl, bs):
 		
 		newPak = PakFile(bs)
 		newPak.readPak()
-		wb = NoeBitStream()
 		
 		#write new bone positions:
 		newBaseFile = ""
@@ -1886,6 +1922,14 @@ def pakWriteModel(mdl, bs):
 			
 			if doWrite:
 				
+				wb = NoeBitStream()
+				newPageStreams = []
+				pageCt = readUIntAt(f, 16)
+				pointerFixupPageCt = readUIntAt(bs, 24)
+				pointerFixupTblOffs = readUIntAt(bs, 28)
+				isModded = (readUIntAt(f, pointerFixupTblOffs + 12*8) == 4294967295)
+				newPage = pageCt if not isModded else pageCt-1
+				
 				for i, meshTuple in enumerate(meshesToInject):
 					
 					writeMesh = meshTuple[0]
@@ -1897,16 +1941,13 @@ def pakWriteModel(mdl, bs):
 					if not dialogOptions.doLODs and LODidx > 0:
 						continue
 					
+					#if len(writeMesh.positions) == 3:
+					#	print("skipping")
+					#	continue
 					
 					print("Injecting ", writeMesh.name)
-					
-					pageCt = readUIntAt(f, 16)
-					pointerFixupPageCt = readUIntAt(bs, 24)
-					pointerFixupTblOffs = readUIntAt(bs, 28)
-					isModded = (readUIntAt(f, pointerFixupTblOffs + 12*8) == 4294967295)
 					appendedPositions = appendedWeights = appendedIndices = isModded #False
 					newPageDataAddr = source.pakPageEntries[len(source.pakPageEntries)-1][0] + source.pakPageEntries[len(source.pakPageEntries)-1][1]
-					newPage = pageCt if not isModded else pageCt-1
 					owningIndex = source.pakPageEntries[len(source.pakPageEntries)-1][2]
 					vertOffs = submeshesAddr + 176*i + 36
 					foundPositions = foundUVs = foundNormals = 0
@@ -1915,22 +1956,37 @@ def pakWriteModel(mdl, bs):
 					wroteColors = False
 					
 					bs.seek(sm.streamsAddr)
-					sdBytesList = []
-					finalSdBytesList = []
-					for j, sd in enumerate(sm.streamDescs):
-						sdBytesList.append(bs.readBytes(24))
+					#sdBytesList = []
+					#finalSdBytesList = []
+					#for j, sd in enumerate(sm.streamDescs):
+					#	sdBytesList.append(bs.readBytes(24))
 					
+					#'''
 					
 					for j, sd in enumerate(sm.streamDescs):
 						bs.seek(sd.offset)
-						bufferStart = tempbs.tell()
 						
-						if appendedPositions:
+						
+						if appendedPositions and wb.tell() + sd.stride * len(writeMesh.positions) > 1048032: #pages have a maximum size
+							newPageStreams.append(wb)
+							newPage += 1
+							wb = NoeBitStream()
+							tempbs = wb
+							
+						if appendedPositions: 
 							newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
 						
+						bufferStart = tempbs.tell()
+						for b in range(sd.stride * len(writeMesh.positions)):
+							tempbs.writeByte(0)
+						bufferEnd = tempbs.tell()
+						tempbs.seek(bufferStart)
+						
 						if ((j == 0 and sd.stride == 12 or sd.stride == 8)) and not foundPositions:
+							#if appendedPositions:
+							#	newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
 							bFoundPositions = True
-							finalSdBytesList.append(sdBytesList[j])
+							#finalSdBytesList.append(sdBytesList[j])
 							if sd.stride == 12:
 								for v, vert in enumerate(writeMesh.positions):
 									tempbs.writeFloat(vert[0] * (1/GlobalScale))
@@ -1944,26 +2000,32 @@ def pakWriteModel(mdl, bs):
 									tempbs.writeHalfFloat(0)
 									
 						elif sd.type == 34:
+							#if appendedPositions:
+							#	newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
 							foundUVs += 1
-							uvs = None
-							if foundUVs == 1:
-								uvs = writeMesh.uvs
-							elif foundUVs == 2:
-								uvs = writeMesh.lmUVs
-							elif len(writeMesh.uvxList) > foundUVs-3:
-								uvs = writeMesh.uvxList[foundUVs-3]
-							if uvs and len(uvs) == len(writeMesh.positions):
-								finalSdBytesList.append(sdBytesList[j])
-								for v, vert in enumerate(uvs):
+							UVs = []
+							if foundUVs == 1 and writeMesh.uvs:
+								UVs = writeMesh.uvs
+							elif foundUVs == 2 and writeMesh.lmUVs:
+								UVs = writeMesh.uvs
+							elif foundUVs > 2 and writeMesh.uvxList and len(writeMesh.uvxList) > foundUVs-3:
+								UVs = writeMesh.uvxList[foundUVs-3]
+							
+							if len(UVs) == len(writeMesh.positions):
+								for v, vert in enumerate(UVs):
 									tempbs.writeHalfFloat(vert[0])
 									tempbs.writeHalfFloat(vert[1])
 							else:
-								for v in range(len(writeMesh.positions)):
-									tempbs.writeUInt(0)
+								for v, vert in enumerate(writeMesh.positions):
+									tempbs.writeHalfFloat(0)
+									tempbs.writeHalfFloat(0)
 									
 						elif sd.type == 31 and foundNormals < 2:
+							#if appendedPositions:
+							#	newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
+
 							foundNormals += 1
-							finalSdBytesList.append(sdBytesList[j])
+							#finalSdBytesList.append(sdBytesList[j])
 							if foundNormals == 1:
 								for v, vert in enumerate(writeMesh.tangents): 
 									tempbs.writeByte(int(vert[0][0] * 127 + 0.5000000001)) #normal
@@ -1982,9 +2044,12 @@ def pakWriteModel(mdl, bs):
 										tempbs.writeByte(127)
 						
 						elif sd.type == 10:
-							if len(writeMesh.colors) > 0 and not wroteColors:
+							#if appendedPositions:
+							#	newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
+
+							if writeMesh.colors and not wroteColors:
 								wroteColors = True
-								finalSdBytesList.append(sdBytesList[j])
+								#finalSdBytesList.append(sdBytesList[j])
 								for v, vert in enumerate(writeMesh.colors):
 									tempbs.writeHalfFloat(vert[0])
 									tempbs.writeHalfFloat(vert[1])
@@ -1998,82 +2063,19 @@ def pakWriteModel(mdl, bs):
 									tempbs.writeHalfFloat(0)
 									
 						else:
+							#if appendedPositions:
+							#	newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
 							print("Nulling unknown component type", sd.type)
-							for b in range(sd.stride * len(writeMesh.positions)):
-								tempbs.writeByte(0)
+
 						
 						#bs.seek(sm.streamsAddr)
 						#for rawBytes in finalSdBytesList:
 						#	bs.writeBytes(rawBytes)
 						
-						
-						if tempbs.tell() - bufferStart > 0:
-							writeUIntAt(bs, sd.bufferOffsetAddr - 12, tempbs.tell()-bufferStart)
-							
-					'''
-					for j, sd in enumerate(sm.streamDescs):
-						bs.seek(sd.offset)
-						bufferStart = tempbs.tell()
-						
-						if ((j == 0 and sd.stride == 12 or sd.stride == 8)) and not foundPositions:
-							bFoundPositions = True
-							if appendedPositions:
-								newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
-							if sd.stride == 12:
-								for v, vert in enumerate(writeMesh.positions):
-									tempbs.writeFloat(vert[0] * (1/GlobalScale))
-									tempbs.writeFloat(vert[1] * (1/GlobalScale))
-									tempbs.writeFloat(vert[2] * (1/GlobalScale))
-							elif sd.stride == 8:
-								for v, vert in enumerate(writeMesh.positions):
-									tempbs.writeHalfFloat(vert[0] * (1/GlobalScale))
-									tempbs.writeHalfFloat(vert[1] * (1/GlobalScale))
-									tempbs.writeHalfFloat(vert[2] * (1/GlobalScale))
-									tempbs.writeHalfFloat(0)
-									
-						elif sd.type == 34 and (foundUVs < 2 or (dialogOptions.exportCopyUV3 or dialogOptions.nullUV3)):
-							foundUVs += 1
-							UVs = writeMesh.lmUVs if dialogOptions.exportCopyUV3 == 2 or foundUVs == 2 else writeMesh.uvs
-							if appendedPositions:
-								newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
-							if foundUVs > 2 and dialogOptions.nullUV3:
-								print(i, "Nulling UV" + str(foundUVs) + " for", sm.name)
-								for v, vert in enumerate(UVs):
-									tempbs.writeHalfFloat(0)
-									tempbs.writeHalfFloat(0)
-							else:
-								for v, vert in enumerate(UVs):
-									tempbs.writeHalfFloat(vert[0])
-									tempbs.writeHalfFloat(vert[1])
-									
-						elif sd.type == 31:
-							foundNormals += 1
-							if appendedPositions:
-								newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
-							if foundNormals == 1:
-								for v, vert in enumerate(writeMesh.tangents): 
-									tempbs.writeByte(int(vert[0][0] * 127 + 0.5000000001)) #normal
-									tempbs.writeByte(int(vert[0][1] * 127 + 0.5000000001))
-									tempbs.writeByte(int(vert[0][2] * 127 + 0.5000000001))
-									tempbs.writeByte(0)
-							elif foundNormals == 2: 
-								foundNormals = 2
-								for v, vert in enumerate(writeMesh.tangents):
-									tempbs.writeByte(int(vert[2][0] * 127 + 0.5000000001)) #bitangent
-									tempbs.writeByte(int(vert[2][1] * 127 + 0.5000000001))
-									tempbs.writeByte(int(vert[2][2] * 127 + 0.5000000001))
-									TNW = vert[0].cross(vert[1]).dot(vert[2])
-									if (TNW < 0.0):
-										tempbs.writeByte(129)
-									else:
-										tempbs.writeByte(127)
-							
-						else:
-							print("Unknown component", sd.type, "!!")
-								
-						if tempbs.tell() - bufferStart > 0:
-							writeUIntAt(bs, sd.bufferOffsetAddr - 12, tempbs.tell()-bufferStart)
-						'''
+						tempbs.seek(bufferEnd)
+						if bufferEnd - bufferStart > 0:
+							writeUIntAt(bs, sd.bufferOffsetAddr - 12, bufferEnd-bufferStart) #buffer size
+					
 					
 					if sm.skinDesc:
 					
@@ -2086,8 +2088,12 @@ def pakWriteModel(mdl, bs):
 									fbxWeightCount += 1
 									trueWeightCounts[v] += 1
 									
-						appendedWeights = (fbxWeightCount > sm.skinDesc.weightCount) or appendedWeights
-						
+						appendedWeights = (fbxWeightCount > sm.skinDesc.weightCount) or appendedPositions #or appendedWeights
+						if appendedWeights and wb.tell() > 0 and wb.tell() + 4*fbxWeightCount + 8*len(writeMesh.positions) > 1048032:
+							newPageStreams.append(wb)
+							newPage += 1
+							wb = NoeBitStream()
+							
 						runningOffset = boneID = 0
 						idxStart = wb.tell() if appendedWeights else sm.skinDesc.mapOffset
 						if appendedWeights:
@@ -2097,7 +2103,6 @@ def pakWriteModel(mdl, bs):
 							newPak.changePointerFixup(sm.skinDesc.weightOffsetAddr, wb.tell(), newPage)
 						wtStart = wb.tell() if appendedWeights else sm.skinDesc.weightsOffset
 						tempbs = wb if appendedWeights else bs
-						
 						for v, vertWeight in enumerate(writeMesh.weights):
 							tempbs.seek(idxStart + 8*v)
 							tempbs.writeUInt(trueWeightCounts[v])
@@ -2115,8 +2120,12 @@ def pakWriteModel(mdl, bs):
 						writeUIntAt(bs, sm.skinDesc.mapOffsetAddr-12, int(runningOffset/4))
 					
 					if len(writeMesh.indices) > sm.numIndices:
-						print(len(writeMesh.indices), "vs", sm.numIndices)
 						appendedIndices = True
+						if appendedIndices and wb.tell() + 6*len(writeMesh.positions) > 1048032:
+							newPageStreams.append(wb)
+							newPage += 1
+							wb = NoeBitStream()
+							
 						newPak.changePointerFixup(sm.facesOffsetAddr, wb.tell(), newPage)
 						for k, idx in enumerate(writeMesh.indices):
 							wb.writeUShort(idx)
@@ -2145,7 +2154,7 @@ def pakWriteModel(mdl, bs):
 					bs.seek(vertOffs)
 					bs.writeUInt(len(writeMesh.positions))
 					bs.writeUInt(len(writeMesh.indices))
-					bs.writeUInt(len(finalSdBytesList))
+					#bs.writeUInt(len(finalSdBytesList))
 					
 					didAppend = (didAppend or appendedPositions or appendedWeights or appendedIndices)
 					if not isModded and (appendedPositions or appendedWeights or appendedIndices):
@@ -2156,6 +2165,9 @@ def pakWriteModel(mdl, bs):
 							print("	-exceeds the maximum weight count of", sm.skinDesc.weightCount, "(has", str(fbxWeightCount) + ")!")
 						if appendedIndices:
 							print("	-exceeds the maximum poly count of", int(sm.numIndices/3), "(has", str(int(len(writeMesh.indices)/3)) + ")!")
+							
+				newPageStreams.append(wb)
+					
 			if isNoesisSplit:
 				print("\nWARNING:	Duplicate mesh names detected! Check your FBX for naming or geometry issues. This pak may crash the game!\n")
 
@@ -2196,49 +2208,72 @@ def pakWriteModel(mdl, bs):
 						print("Texture was found, but is not in the pak file\n	", fileName)
 							
 							
-		if doWrite:# and didAppend:
-			if not isModded:
-				print("\nFile was not previously injected")
-				writeUIntAt(bs, 28, pointerFixupTblOffs+12)
-				writeUIntAt(bs, 16, pageCt+1) # add new page
-				bs.seek(pointerFixupTblOffs)
-				oldBytes = bs.readBytes(12) #copy old pointerFixup
-				bs.seek(-12, 1)
-				bs.writeUInt(newPageDataAddr + 16) # new page offset
-				bs.writeUInt(wb.getSize()+20) # new page size
-				bs.writeUInt(owningIndex) # new package owning index
-				bs.writeBytes(oldBytes)
-				padBytes = bs.readBytes(16) #blank padding bytes
-				writeUIntAt(bs, 4, readUIntAt(bs, 4)+16) #add to headerSz
-				writeUIntAt(bs, pointerFixupTblOffs+12+4, readUIntAt(bs, pointerFixupTblOffs+12+4)+16) #add to PointerFixupEntries dataOffset
-				bs.seek(readUIntAt(bs, 20))
-				for i in range(pageCt):
-					bs.writeUInt(readUIntAt(bs, bs.tell())+16) #add to each pageEntryOffset
-					bs.seek(8, 1)
-					
-			else:
-				print("\nFile was previously injected. It is recommended to inject an unedited pak file")
+		if doWrite:
 			
-			ns = NoeBitStream()
-			bs.seek(0)
-			if not isModded:
-				ns.writeBytes(bs.readBytes(pointerFixupTblOffs+12*8))
-				ns.writeBytes(padBytes) #move old PointerFixupTables here
-				writeUIntAt(ns, ns.tell()-4, 4294967295) #Marker for modding identification
-			ns.writeBytes(bs.readBytes(newPageDataAddr - bs.tell()))
+			newPageDataAddrs = []
+			numPages = len(newPageStreams)
+			newPakPageHeaders = NoeBitStream()
+			addAmt = 12*numPages
+			orgPFixupPadAmt = 16 - ((pointerFixupTblOffs+8*12) % 16)
+			pFixupPadAmt = 16 - ((pointerFixupTblOffs+8*12+addAmt+orgPFixupPadAmt) % 16) + 16
+			writeUIntAt(bs, 28, pointerFixupTblOffs+12*numPages) #write pointerFixupTableOffset
+			writeUIntAt(bs, 16, pageCt+numPages) # add new pages
+			writeUIntAt(bs, pointerFixupTblOffs+4, readUIntAt(bs, pointerFixupTblOffs+4)+addAmt+pFixupPadAmt) #new dataOffset
+
+			bs.seek(pointerFixupTblOffs)
+			oldBytes = bs.readBytes(12) #copy old pointerFixup
+			bs.seek(-12, 1)
+			for i, wb in enumerate(newPageStreams):
+				newPageDataAddrs.append(newPageDataAddr)
+				while (newPageDataAddr+addAmt+pFixupPadAmt+wb.getSize()) % 16 != 12: #pad it out
+					wb.writeByte(0)
+				newPakPageHeaders.writeUInt(newPageDataAddr+addAmt+pFixupPadAmt) # new page offset
+				newPakPageHeaders.writeUInt(wb.getSize()+20) # new page size
+				newPakPageHeaders.writeUInt(owningIndex) # new package owning index
+				newPageDataAddr = newPageDataAddr + wb.getSize()+20
 				
-			ns.writeUInt64(16045690984833335023) #DEADBEEF
-			ns.writeUInt(0) #74565) #unknown
-			ns.writeUInt(wb.getSize()+20) #new size
-			ns.writeUShort(owningIndex)
-			ns.writeUShort(0)
-			ns.writeBytes(wb.getBuffer())
+			writeUIntAt(bs, 4, readUIntAt(bs, 4)+addAmt+pFixupPadAmt) #add to headerSz
+			
+			bs.seek(readUIntAt(bs, 20))
+			for i in range(pageCt):
+				bs.writeUInt(readUIntAt(bs, bs.tell())+addAmt+pFixupPadAmt) #add to each pageEntryOffset
+				bs.seek(8, 1)
+					
 			if isModded:
-				bs.seek(newPageDataAddr) #skip (delete) contents of page from previous injection
+				print("\nWARNING: File was previously injected. It is recommended to inject an unedited pak file\n")
+			
+			bs.seek(0)
+			ns = NoeBitStream()
+			ns.writeBytes(bs.readBytes(pointerFixupTblOffs))
+			ns.writeBytes(newPakPageHeaders.getBuffer())
+			ns.writeBytes(oldBytes)
+			
+			for i in range(7):
+				ns.writeUInt64(0)
+				ns.writeUInt(0)
+			for i in range(pFixupPadAmt):
+				ns.writeByte(0)
+			writeUIntAt(ns, ns.tell()-pFixupPadAmt, 4294967295) #modded file marker
+			
+			bs.seek(pointerFixupTblOffs+12*8)
+			
+			ns.writeBytes(bs.readBytes(newPageDataAddrs[0] - bs.tell()))
+			
+			for i, wb in enumerate(newPageStreams):
+				ns.writeUInt64(16045690984833335023) #0xDEADBEEF
+				ns.writeUInt(0) #74565) #unknown
+				ns.writeUInt(wb.getSize()+20) #new size
+				ns.writeUShort(owningIndex)
+				ns.writeUShort(0)
+				ns.writeBytes(wb.getBuffer())
+				#if isModded:
+				#	bs.seek(newPageDataAddrs[i]) #skip (delete) contents of page from previous injection
 			ns.writeBytes(bs.readBytes(bs.getSize()-bs.tell()))
 			
 			bs.seek(0)
 			bs.writeBytes(ns.getBuffer())
+			
+			print("Added", numPages, "new pages")
 		
 		if newBaseFile:
 			print("Wrote new skeleton to", newBaseFile)

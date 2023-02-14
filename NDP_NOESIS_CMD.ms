@@ -1,6 +1,6 @@
 --Naughty Dog PAK Noesis CMD tool
---Version: v0.23
---Last Release: February 8 2023
+--Version: v0.24
+--Last Release: February 14 2023
 --Created by: alphaZomega 
 
 global noesis_path = "C:\\Program Files\\Noesis\\Noesis.exe"
@@ -39,7 +39,7 @@ fn selectSkeleton node = (
 )
 
 try(destroydialog formNPDNoesisCMD; clearlistener())catch()
-rollout formNPDNoesisCMD "Noesis PAK v0.23" (
+rollout formNPDNoesisCMD "Noesis PAK v0.24" (
 	group "Import" (
 		button btn_import "Import To Scene" align:#center
 		checkbox chk_legacyFBX "Use Legacy FBX" checked:false align:#left tooltip:"Import as FBX 2014"
@@ -234,7 +234,7 @@ rollout formNPDNoesisCMD "Noesis PAK v0.23" (
 				)
 				
 				local copyNodes = #()
-				for obj in originalSelection where obj.modifiers[#Skin] != undefined do ( 
+				/*for obj in originalSelection where obj.modifiers[#Skin] != undefined do ( 
 					selectSkeleton obj
 					--Create dummy mesh with all bones in skin modifier so that FBX will save all bones
 					maxOps.cloneNodes obj cloneType:#copy newNodes:&copyNodes #nodialog
@@ -244,7 +244,7 @@ rollout formNPDNoesisCMD "Noesis PAK v0.23" (
 							skinops.addBone copyNodes[1].modifiers[#Skin] bn 0
 					selectmore lastSelection
 					exit
-				)
+				)*/
 				
 				if chk_showPlugOpt.checked then (--chk_expPrompt
 					exportFile fbx_path selectedOnly:true using:FBXEXP
@@ -272,7 +272,7 @@ rollout formNPDNoesisCMD "Noesis PAK v0.23" (
 						format "Deleted FBX file %" fbx_path
 					)
 				)
-				if copyNodes[1] != undefined then delete copyNodes[1]
+				--if copyNodes[1] != undefined then delete copyNodes[1]
 					
 				actionMan.executeAction 0 "40472" --open listener
 				
