@@ -1,5 +1,5 @@
 --Naughty Dog PAK Noesis CMD tool
---Version: v0.24
+--Version: v0.25
 --Last Release: February 14 2023
 --Created by: alphaZomega 
 
@@ -39,7 +39,7 @@ fn selectSkeleton node = (
 )
 
 try(destroydialog formNPDNoesisCMD; clearlistener())catch()
-rollout formNPDNoesisCMD "Noesis PAK v0.24" (
+rollout formNPDNoesisCMD "Noesis PAK v0.25" (
 	group "Import" (
 		button btn_import "Import To Scene" align:#center
 		checkbox chk_legacyFBX "Use Legacy FBX" checked:false align:#left tooltip:"Import as FBX 2014"
@@ -51,6 +51,12 @@ rollout formNPDNoesisCMD "Noesis PAK v0.24" (
 		button btn_export "Export To Game" align:#center
 		checkbox chk_writeBones "Write Bone Positions" checked:false align:#left
 		checkbox chk_texOnly "Inject Textures Only" checked:false align:#left
+		checkbox chk_useTexFolder "Use this texture folder:" checked:false align:#left
+		edittext edt_folder "" align:#left 
+		button btn_browseTexFolder "Browse" align:#center 
+		checkbox chk_injectThisMesh "Inject this mesh:" checked:false align:#left
+		edittext edt_injectMeshName "" align:#left 
+		button btn_browseInjectMesh "Browse" align:#center
 	)
 	group "Utilities" (
 		--button BtnSkinOnTop "Move Skin to Top of Stack" align:#center 
@@ -61,7 +67,8 @@ rollout formNPDNoesisCMD "Noesis PAK v0.24" (
 	group "Config" (
 		checkbox chk_showPlugOpt  "Show FBX Options" checked:false align:#left
 		checkbox chk_delFBX  "Delete FBX Files" checked:true align:#left
-		checkbox chk_showCMD  "Show Console" checked:false align:#left enabled:true
+		checkbox chk_showCMD  "Show Console" checked:false align:#left
+		checkbox chk_noDialog  "No Dialog" checked:false align:#left
 		label lbl_noesis "Noesis Path:" align:#left
 		edittext edt_noesis "" align:#left 
 		button btn_noesis "Browse" align:#center tooltip:"Edit NDP_Noesis_CMD.ms (this script) in a text editor to save your Noesis path"
@@ -104,13 +111,36 @@ rollout formNPDNoesisCMD "Noesis PAK v0.24" (
 			)
 		)
 	on btn_noesis pressed do (
-		cmd = getOpenFileName types:"Noesis.exe|noesis.exe|All|*.*|"
+		local cmd = getOpenFileName types:"Noesis.exe|noesis.exe|All|*.*|"
 		if cmd != undefined and cmd != "" do (
 			edt_noesis.text = noesis_path = cmd
 		)
 	)
+	 
+	on btn_browseInjectMesh pressed do (
+		local cmd = getOpenFileName types:"Naughty Dog PAK Model|*.pak|All|*.*|"
+		if cmd != undefined and doesFileExist cmd then (
+			edt_injectMeshName.text = cmd
+			chk_injectThisMesh.checked = true
+		)
+	)
+	
+	on btn_browseTexFolder pressed do (
+		local cmd = getOpenFileName types:"DDS Image|*.dds|All|*.*|"
+		if cmd != undefined and doesFileExist (getFilenamePath cmd) then (
+			edt_folder.text = getFilenamePath cmd
+			chk_useTexFolder.checked = true
+		)
+	)
+	
 	on edt_noesis changed cmd do (
 		edt_noesis.text = noesis_path = cmd
+	)
+	on edt_folder changed cmd do (
+		edt_folder.text = cmd
+	)
+	on edt_injectMeshName changed cmd do (
+		edt_injectMeshName.text = cmd
 	)
 	on btn_import pressed do (
 		if noesisComponentsFound() then (
@@ -132,7 +162,8 @@ rollout formNPDNoesisCMD "Noesis PAK v0.24" (
 						"\"" + noesis_path + "\" ?cmode \"" + cmd + "\" \"" + fbx_path + "\"" \
 						 + (if chk_legacyFBX.checked then " -fbxoldexport -fbxexportver FBX201400" else "") \
 						 + (if not chk_rpgOptimize.checked then " -fbxnooptimize" else "") \
-						 + (" -noprompt -notex -fbxmeshmerge") --always
+						 + (if chk_noDialog.checked then " -nodialog" else "") \
+						 + (" -notex -fbxmeshmerge") --always
 					) -- -
 					if chk_showCMD.checked then (
 						DOSCommand ("\"" + cmd + " -logfile \"" + outtxt_path + "\"") 
@@ -213,21 +244,36 @@ rollout formNPDNoesisCMD "Noesis PAK v0.24" (
 			)
 		) else (messagebox "Failed to Locate Noesis!")
 	)
+	
 	on btn_export pressed do (
 		if noesisComponentsFound() then (
-			local cmd = getOpenFileName types:"Naughty Dog PAK Model|*.pak|All|*.*|"
+			local doUseGivenMesh = (chk_injectThisMesh.checked and doesFileExist edt_injectMeshName.text)
+			if doUseGivenMesh then
+				local cmd = getSaveFileName types:"Naughty Dog PAK Model|*.pak|All|*.*|"
+			else
+				local cmd = getOpenFileName types:"Naughty Dog PAK Model|*.pak|All|*.*|"
+				
 			if cmd != undefined and cmd != "" do (
 				local fbx_path = (getFilenamePath cmd) + ((getFilenameFile cmd)) + ".fbx"
 				local out_path = (getFilenamePath cmd) + ((getFilenameFile cmd)) + ".NEW" + (getFilenameType  cmd)
 				local outtxt_path = fbx_path + ".txt"
 				
-				if findString (toLower fbx_path) ".orig.fbx" != undefined then (
+				if not doUseGivenMesh and findString (toLower fbx_path) ".orig.fbx" != undefined then (
 					meshPath = (replace fbx_path (findString (toLower fbx_path) ".orig.fbx") 9 (".pak"))
 					format "Changing file output from %.pak to %.pak\n" (getFilenameFile out_path) (getFilenameFile meshPath)
 					out_path = meshPath
 				)
 				
 				local originalSelection = selection as array
+				
+				for mesh in originalSelection where superclassof mesh == GeometryClass and mesh.modifiers[#Skin] != undefined do (
+					select mesh
+					max modify mode
+					mesh.modifiers[#Skin].bone_Limit = 8 
+					skinOps.RemoveZeroWeights mesh.modifiers[#Skin]
+				)
+				
+				select originalSelection
 				for obj in originalSelection where superclassof obj == GeometryClass and obj.modifiers[#Skin] != undefined do ( 
 					selectSkeleton obj 
 					exit
@@ -246,6 +292,8 @@ rollout formNPDNoesisCMD "Noesis PAK v0.24" (
 					exit
 				)*/
 				
+
+				
 				if chk_showPlugOpt.checked then (--chk_expPrompt
 					exportFile fbx_path selectedOnly:true using:FBXEXP
 				)
@@ -258,7 +306,8 @@ rollout formNPDNoesisCMD "Noesis PAK v0.24" (
 						"\"" + noesis_path + "\" ?cmode \"" + fbx_path + "\" \"" + out_path + "\"" \
 						+ (if chk_writeBones.checked then " -bones" else "") \
 						+ (if chk_texOnly.checked then " -t" else "") \
-						+ (" -meshfile \"" + cmd + "\"") \
+						+ (" -meshfile \"" + (if doUseGivenMesh then edt_injectMeshName.text else cmd) + "\"") \
+						+ (if chk_useTexFolder.checked then (" -texfolder \"" + edt_folder.text + "\"") else "") \
 					)
 					if chk_showCMD.checked then (
 						DOSCommand ("\"" + cmd + " -logfile \"" + outtxt_path + "\"")
@@ -289,6 +338,7 @@ rollout formNPDNoesisCMD "Noesis PAK v0.24" (
 						deletefile outtxt_path
 					)
 				)
+				select originalSelection
 			)
 		) else (messagebox "Failed to Locate Noesis!")
 	)

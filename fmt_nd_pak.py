@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Uncharted 4 ".pak" plugin for Rich Whitehouse's Noesis
 #Authors: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v1.2 (February 14, 2023)'
+Version = 'v1.3 (February 16, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -16,6 +16,8 @@ FlipUVs = False													# Flip UVs and flip texture images rightside-up (NOT
 LoadAllTextures = False											# Load all textures onto a model, rather than only color and normal maps
 ReadColors = False												# Read vertex colors
 PrintMaterialParams = False										# Print out all material parameters in the debug log when importing
+texoutExt = ".dds"												# Extension of texture files (change to load textures of a specific type in Blender)
+gameName = "U4"													# Default game name
 
 
 # Set the base path from which the plugin will search for pak files and textures:
@@ -32,7 +34,7 @@ import os
 import re
 import random
 
-gameName = "U4"
+
 
 class DialogOptions:
 	def __init__(self):
@@ -59,7 +61,8 @@ def registerNoesisTypes():
 	noesis.addOption(handle, "-nodialog", "Do not display dialog window", 0)
 	noesis.addOption(handle, "-t", "Textures only; do not inject geometry data", 0)
 	noesis.addOption(handle, "-bones", "Write bone positions", 0)
-	noesis.addOption(handle, "-meshfile", "Export using a given source mesh filename", noesis.OPTFLAG_WANTARG)
+	noesis.addOption(handle, "-meshfile", "Export using a given source mesh filepath", noesis.OPTFLAG_WANTARG)
+	noesis.addOption(handle, "-texfolder", "Export using a given textures folder for embedding", noesis.OPTFLAG_WANTARG)
 	noesis.setHandlerTypeCheck(handle, pakCheckType)
 	noesis.setHandlerLoadModel(handle, pakLoadModel)
 	noesis.setHandlerWriteModel(handle, pakWriteModel)
@@ -1120,6 +1123,7 @@ class PakFile:
 			m_pageSize = bs.readUInt()
 			bs.seek(2,1)
 			m_numPageHeaderEntries = bs.readUShort()
+			vramNames = {}
 			
 			for ph in range(m_numPageHeaderEntries):
 				m_name = readStringAt(bs, bs.readUInt64()+start)
@@ -1137,8 +1141,13 @@ class PakFile:
 					bs.seek(m_resItemOffset + start + 56)
 					texHash = bs.readUInt64()
 					texPath = readStringAt(bs, m_resItemOffset + start + 112)
-					texName = rapi.getLocalFileName(texPath[:texPath.find(".tga")+4]).replace(".ndb", "").replace(".tga", ".dds")
-					self.vrams[texHash] = [m_resItemOffset + start, texName, [], None]
+					splitted = rapi.getLocalFileName(texPath.replace(".tga/", "+")).split("+", 1)
+					texName = splitted[0] + texoutExt
+					if len(splitted) > 1:
+						if texName in vramNames:
+							texName = (splitted[0] + "_" + splitted[1]).replace(".ndb", texoutExt)
+						vramNames[texName] = True
+						self.vrams[texHash] = [m_resItemOffset + start, texName, [], None]
 					
 					if getattr(self, "vramDicts") and texHash not in self.vramDicts[key]:
 						self.vramDicts[key][texHash] = m_resItemOffset + start + self.startAddr
@@ -1394,12 +1403,13 @@ class PakFile:
 					bs.seek(nrmRecalcDescOffs)
 					indexCount = bs.readInt()
 					uknInt2 = bs.readInt()
+					ptrOffsetsStart = bs.tell()
 					ptr1 = readPointerFixup()
 					ptr2 = readPointerFixup()
 					ptr3 = readPointerFixup()
 					ptr4 = readPointerFixup()
 					
-					self.submeshes[i].nrmRecalcDesc = [ptr1, ptr2, ptr3, ptr4, indexCount, nrmRecalcDescOffsOffset]
+					self.submeshes[i].nrmRecalcDesc = [ptr1, ptr2, ptr3, ptr4, indexCount, nrmRecalcDescOffsOffset, ptrOffsetsStart]
 				
 				if skindataOffset:
 					bs.seek(skindataOffset)
@@ -1448,8 +1458,7 @@ class PakFile:
 						bs.seek(readPointerFixup())
 						path = readStringAt(bs, readPointerFixup())
 						vramHash = bs.readUInt64()
-						
-						texFileName = rapi.getLocalFileName(path[:path.find(".tga")+4]).replace(".tga", ".dds")
+						texFileName = self.vrams[vramHash][1] if vramHash in self.vrams else ""
 						doSet = False
 						
 						if texFileName and name.find("01") != -1:
@@ -1464,7 +1473,7 @@ class PakFile:
 									material.flags |= noesis.NMATFLAG_NORMALMAP_FLIPY #| noesis.NMATFLAG_NORMALMAP_NODERZ
 									
 									if name.find("NR") != -1 and texFileName.find("-ao") != -1: # Ambient Occlusion
-										self.vrams[vramHash][2].append(texFileName.replace(".dds", "_NoesisAO.dds"))
+										self.vrams[vramHash][2].append(texFileName.replace(texoutExt, "_NoesisAO" + texoutExt))
 										material.setOcclTexture(self.vrams[vramHash][2][len(self.vrams[vramHash][2])-1])
 								
 							elif not loadedTrans and name.find("Transparency01") != -1:
@@ -1475,10 +1484,10 @@ class PakFile:
 								
 								if dialogOptions.doConvertTex:
 									if not loadedNormal:
-										self.vrams[vramHash][2].append("NoesisNRM.dds")
+										self.vrams[vramHash][2].append("NoesisNRM" + texoutExt)
 										material.setNormalTexture(self.vrams[vramHash][2][len(self.vrams[vramHash][2])-1])
 									if not loadedDiffuse:
-										self.vrams[vramHash][2].append("NoesisBrown.dds")
+										self.vrams[vramHash][2].append("NoesisBrown" + texoutExt)
 										material.setTexture(self.vrams[vramHash][2][len(self.vrams[vramHash][2])-1])
 									
 							elif not loadedSpec and name.find("pecular") != -1:
@@ -1678,7 +1687,7 @@ class PakFile:
 			sortedTupleList = sorted([ (subTuple[1], subTuple[0]) for hash, subTuple in self.vrams.items() ])
 			for sortTuple in sortedTupleList:
 				if sortTuple[0]:
-					print("    " + sortTuple[0].replace(".tga", ".dds") + "  --  " + dxFormat.get(readUIntAt(bs, sortTuple[1]+72)))
+					print("    " + sortTuple[0].replace(".tga", texoutExt) + "  --  " + dxFormat.get(readUIntAt(bs, sortTuple[1]+72)))
 			print("")
 			
 		else:
@@ -1797,6 +1806,10 @@ def pakWriteModel(mdl, bs):
 	def getExportName(fileName):		
 		if fileName == None:
 			injectMeshName = re.sub(r'out\w+\.', '.', rapi.getOutputName().lower()).replace("fbx",".").replace("out.pak",".pak")
+			splittedTarget = injectMeshName.split("ncharted4_data", 1)
+			splittedSource = BaseDirectories[gameName].split("ncharted4_data", 1)
+			if len(splittedTarget) > 1 and len(splittedSource) > 1 and rapi.checkFileExists(splittedSource[0] + "ncharted4_data" + splittedTarget[1].replace(".orig", "")): 
+				injectMeshName = splittedSource[0] + "ncharted4_data" + splittedTarget[1].replace(".orig", "")
 			if rapi.checkFileExists(injectMeshName.replace(".pak", ".orig.pak")):
 				injectMeshName = injectMeshName.replace(".pak", ".orig.pak")
 		else:
@@ -2143,12 +2156,29 @@ def pakWriteModel(mdl, bs):
 					if sm.nrmRecalcDesc:
 						#bs.seek(sm.nrmRecalcDesc[5])
 						#bs.writeUInt64(0)
-						bs.seek(sm.nrmRecalcDesc[1])
+						
+						'''bs.seek(sm.nrmRecalcDesc[1])
 						for k in range(sm.nrmRecalcDesc[4]):
 							bs.writeShort(0)
 						bs.seek(sm.nrmRecalcDesc[3])
 						for k in range(sm.nrmRecalcDesc[4]):
-							bs.writeShort(0)
+							bs.writeShort(0)'''
+						
+						for n in range(4):
+							bs.seek(sm.nrmRecalcDesc[n])
+							appendedPositions = appendedPositions or (len(writeMesh.positions) > readUIntAt(bs, sm.nrmRecalcDesc[6]-8))
+							tempbs = wb if appendedPositions else bs
+							if appendedPositions: 
+								if wb.tell() + 2 * len(writeMesh.positions) > 1048032:
+									newPageStreams.append(wb)
+									newPage += 1
+									wb = NoeBitStream()
+									tempbs = wb
+								newPak.changePointerFixup(sm.nrmRecalcDesc[6] + 8*n, wb.tell(), newPage)
+							for k in range(len(writeMesh.positions)+1):
+								tempbs.writeShort(0)
+							writeUIntAt(bs, sm.nrmRecalcDesc[6]-8, len(writeMesh.positions))
+							writeUIntAt(bs, sm.nrmRecalcDesc[6]-4, len(writeMesh.indices))
 					
 					#set vertex/index counts:
 					bs.seek(vertOffs)
@@ -2189,8 +2219,12 @@ def pakWriteModel(mdl, bs):
 				writeUIntAt(bs, lodDescs[a] + 4, firstLODSubmeshCount)
 				
 		#Embed image data
-		path = rapi.getDirForFilePath(injectMeshName)+rapi.getLocalFileName(injectMeshName).split(".", 1)[0]
-		print("\nChecking for textures to embed in", path)
+		path = rapi.getDirForFilePath(rapi.getOutputName())+rapi.getLocalFileName(rapi.getOutputName()).split(".", 1)[0]
+		path2 = rapi.getDirForFilePath(injectMeshName)+rapi.getLocalFileName(injectMeshName).split(".", 1)[0]
+		if noesis.optWasInvoked("-texfolder") and os.path.isdir(noesis.optGetArg("-texfolder")):
+			path = noesis.optGetArg("-texfolder")
+		print("\nChecking for textures to embed in:\n -", path, "\n -", path2)
+		path = path2 if not os.path.isdir(path) else path
 		if os.path.isdir(path):
 			source.bs = bs
 			vramPathDict = {}
@@ -2198,7 +2232,7 @@ def pakWriteModel(mdl, bs):
 				vramPathDict[vramTuple[1]] = (vramTuple[0], hash)
 				
 			for fileName in os.listdir(path):
-				if os.path.isfile(os.path.join(path, fileName)) and fileName.find(".dds") != -1:
+				if os.path.isfile(os.path.join(path, fileName)) and fileName.find(texoutExt) != -1:
 					vramTuple = vramPathDict.get(fileName)
 					if vramTuple:
 						print("\nEmbedding texture", fileName)
@@ -2208,14 +2242,14 @@ def pakWriteModel(mdl, bs):
 						print("Texture was found, but is not in the pak file\n	", fileName)
 							
 							
-		if doWrite:
+		if doWrite and didAppend:
 			
 			newPageDataAddrs = []
 			numPages = len(newPageStreams)
 			newPakPageHeaders = NoeBitStream()
 			addAmt = 12*numPages
 			orgPFixupPadAmt = 16 - ((pointerFixupTblOffs+8*12) % 16)
-			pFixupPadAmt = 16 - ((pointerFixupTblOffs+8*12+addAmt+orgPFixupPadAmt) % 16) + 16
+			pFixupPadAmt = 16 - ((pointerFixupTblOffs+8*12+addAmt+orgPFixupPadAmt) % 16) + 16 #pad to 16-bytes aligned, then add +16 bytes of new padding for 4294967295 modded marker / extra info
 			writeUIntAt(bs, 28, pointerFixupTblOffs+12*numPages) #write pointerFixupTableOffset
 			writeUIntAt(bs, 16, pageCt+numPages) # add new pages
 			writeUIntAt(bs, pointerFixupTblOffs+4, readUIntAt(bs, pointerFixupTblOffs+4)+addAmt+pFixupPadAmt) #new dataOffset
@@ -2253,7 +2287,9 @@ def pakWriteModel(mdl, bs):
 				ns.writeUInt(0)
 			for i in range(pFixupPadAmt):
 				ns.writeByte(0)
-			writeUIntAt(ns, ns.tell()-pFixupPadAmt, 4294967295) #modded file marker
+			if not isModded:
+				writeUIntAt(ns, ns.tell()-pFixupPadAmt, 4294967295) #modded file marker
+				writeUIntAt(ns, ns.tell()-pFixupPadAmt+4, pageCt) #original unmodded page count
 			
 			bs.seek(pointerFixupTblOffs+12*8)
 			
