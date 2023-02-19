@@ -1,6 +1,6 @@
 --Naughty Dog PAK Noesis CMD tool
---Version: v0.25
---Last Release: February 14 2023
+--Version: v0.26
+--Last Release: February 19 2023
 --Created by: alphaZomega 
 
 global noesis_path = "C:\\Program Files\\Noesis\\Noesis.exe"
@@ -39,7 +39,7 @@ fn selectSkeleton node = (
 )
 
 try(destroydialog formNPDNoesisCMD; clearlistener())catch()
-rollout formNPDNoesisCMD "Noesis PAK v0.25" (
+rollout formNPDNoesisCMD "Noesis PAK v0.26" (
 	group "Import" (
 		button btn_import "Import To Scene" align:#center
 		checkbox chk_legacyFBX "Use Legacy FBX" checked:false align:#left tooltip:"Import as FBX 2014"
@@ -63,12 +63,14 @@ rollout formNPDNoesisCMD "Noesis PAK v0.25" (
 		button BtnSetScale "Set Scale" offset:[-30,0] toolTip:"Multiply mesh scale by this value.\nRight click to change preset scales"
 		edittext FldScale "" text:"1.0" fieldWidth:60 labelOnTop:false offset:[70,-25]
 		button btn_reimport "Reimport Noesis FBX" align:#center
+		button btn_removeZeroWeights "Set Bone Limits" align:#center toolTip:"Set the Bone Affect Limit for the selected meshes to 8, and Remove Zero Weights"
 	)
 	group "Config" (
 		checkbox chk_showPlugOpt  "Show FBX Options" checked:false align:#left
 		checkbox chk_delFBX  "Delete FBX Files" checked:true align:#left
 		checkbox chk_showCMD  "Show Console" checked:false align:#left
 		checkbox chk_noDialog  "No Dialog" checked:false align:#left
+		checkbox chk_doLODs  "Import/Export all LODs" checked:false align:#left
 		label lbl_noesis "Noesis Path:" align:#left
 		edittext edt_noesis "" align:#left 
 		button btn_noesis "Browse" align:#center tooltip:"Edit NDP_Noesis_CMD.ms (this script) in a text editor to save your Noesis path"
@@ -89,14 +91,16 @@ rollout formNPDNoesisCMD "Noesis PAK v0.25" (
 	)
 	fn waitForFileUnlock file file_open_limit:30 = (
 		local i = 0
-		while i < file_open_limit do (
+		local startTime = timeStamp()
+		while i < file_open_limit and timeStamp()-startTime < file_open_limit do (
 			if (try(renameFile file (file + ".tmp"))catch(false)) do (
 				renameFile (file + ".tmp") file
-				exit
+				return true
 			)
 			sleep 1
 			i += 1
 		)
+		return false
 	)
 	fn noesisComponentsFound = (
 		local state = false
@@ -142,6 +146,19 @@ rollout formNPDNoesisCMD "Noesis PAK v0.25" (
 	on edt_injectMeshName changed cmd do (
 		edt_injectMeshName.text = cmd
 	)
+	
+	on btn_removeZeroWeights pressed do (
+		local oldSelection = $
+		for mesh in $ where superclassof mesh == GeometryClass and mesh.modifiers[#Skin] != undefined and mesh.modifiers[#Skin].bone_Limit > 8 do (
+			select mesh
+			max modify mode
+			mesh.modifiers[#Skin].bone_Limit = 8 
+			skinOps.RemoveZeroWeights mesh.modifiers[#Skin]
+		)
+		select oldSelection
+	)
+	
+	
 	on btn_import pressed do (
 		if noesisComponentsFound() then (
 			local cmd = getOpenFileName types:"Naughty Dog PAK Model|*.pak|All|*.*|"
@@ -163,6 +180,7 @@ rollout formNPDNoesisCMD "Noesis PAK v0.25" (
 						 + (if chk_legacyFBX.checked then " -fbxoldexport -fbxexportver FBX201400" else "") \
 						 + (if not chk_rpgOptimize.checked then " -fbxnooptimize" else "") \
 						 + (if chk_noDialog.checked then " -nodialog" else "") \
+						 + (if chk_doLODs.checked then " -lods" else "") \
 						 + (" -notex -fbxmeshmerge") --always
 					) -- -
 					if chk_showCMD.checked then (
@@ -266,14 +284,7 @@ rollout formNPDNoesisCMD "Noesis PAK v0.25" (
 				
 				local originalSelection = selection as array
 				
-				for mesh in originalSelection where superclassof mesh == GeometryClass and mesh.modifiers[#Skin] != undefined do (
-					select mesh
-					max modify mode
-					mesh.modifiers[#Skin].bone_Limit = 8 
-					skinOps.RemoveZeroWeights mesh.modifiers[#Skin]
-				)
-				
-				select originalSelection
+				--select originalSelection
 				for obj in originalSelection where superclassof obj == GeometryClass and obj.modifiers[#Skin] != undefined do ( 
 					selectSkeleton obj 
 					exit
@@ -306,6 +317,7 @@ rollout formNPDNoesisCMD "Noesis PAK v0.25" (
 						"\"" + noesis_path + "\" ?cmode \"" + fbx_path + "\" \"" + out_path + "\"" \
 						+ (if chk_writeBones.checked then " -bones" else "") \
 						+ (if chk_texOnly.checked then " -t" else "") \
+						+ (if chk_doLODs.checked then " -lods" else "") \
 						+ (" -meshfile \"" + (if doUseGivenMesh then edt_injectMeshName.text else cmd) + "\"") \
 						+ (if chk_useTexFolder.checked then (" -texfolder \"" + edt_folder.text + "\"") else "") \
 					)
@@ -358,7 +370,10 @@ rollout formNPDNoesisCMD "Noesis PAK v0.25" (
 					if not (exportFile fbx_path #noPrompt selectedOnly:true using:FBXEXP) then format ("Failed to write to %\n" fbx_path)
 				)
 				if doesFileExist fbx_path do (
-					waitForFileUnlock(fbx_path)
+					if not waitForFileUnlock(fbx_path) then (
+						messagebox "Failed to read fbx (timeout)"
+						return false
+					)
 					cmd = (
 						"\"" + noesis_path + "\" ?cmode \"" + fbx_path + "\" \"" + cmd + "\"" + " -fbxmeshmerge -noanims -notex"  -- + (if chk_noesisOpt.checked then " -RPGOptimize" else "")
 					)
@@ -370,8 +385,14 @@ rollout formNPDNoesisCMD "Noesis PAK v0.25" (
 					)
 					
 					format "%\n" cmd
-					waitForFileUnlock(fbx_path)
-					waitForFileUnlock(newFile)
+					if not waitForFileUnlock(fbx_path) then (
+						messagebox "Failed to read fbx (timeout)"
+						return false
+					)
+					if not waitForFileUnlock(newFile) then (
+						messagebox "Failed to read new pak file (timeout)"
+						return false
+					)
 					oldObj = objects as array
 					
 					if chk_showPlugOpt.checked then (

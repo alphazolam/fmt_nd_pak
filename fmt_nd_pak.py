@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Uncharted 4 ".pak" plugin for Rich Whitehouse's Noesis
 #Authors: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v1.3 (February 16, 2023)'
+Version = 'v1.31 (February 19, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -61,6 +61,7 @@ def registerNoesisTypes():
 	noesis.addOption(handle, "-nodialog", "Do not display dialog window", 0)
 	noesis.addOption(handle, "-t", "Textures only; do not inject geometry data", 0)
 	noesis.addOption(handle, "-bones", "Write bone positions", 0)
+	noesis.addOption(handle, "-lods", "Import/Export with all LODs", 0)
 	noesis.addOption(handle, "-meshfile", "Export using a given source mesh filepath", noesis.OPTFLAG_WANTARG)
 	noesis.addOption(handle, "-texfolder", "Export using a given textures folder for embedding", noesis.OPTFLAG_WANTARG)
 	noesis.setHandlerTypeCheck(handle, pakCheckType)
@@ -802,6 +803,8 @@ class openOptionsDialogWindow:
 			
 			
 
+LODSubmeshDesc = namedtuple("LODSubmeshDesc", "name address offset index")
+
 JointsInfo = namedtuple("JointsInfo", "transformsStart parentingStart")
 
 StreamDesc = namedtuple("StreamDesc", "type offset stride bufferOffsetAddr")
@@ -835,6 +838,7 @@ class PakFile:
 		self.matNames = args.get("matNames") or []
 		self.vramHashes = args.get("vramHashes") or []
 		self.userStreams = args.get("userStreams") or {}
+		self.lods = args.get("lods") or []
 		self.jointsInfo = None
 		self.jointOffset = None
 		self.basePak = None
@@ -868,7 +872,8 @@ class PakFile:
 			pageId = self.getPointerFixupPage(readAddr)
 			if pageId != None:
 				return offset + self.pakPageEntries[pageId][0]
-			print("ReadAddr not" + asdf + " found in PointerFixups!", readAddr, pageId)
+			print("ReadAddr not found in PointerFixups!", readAddr, pageIdm)
+			print("ReadAddr not found in PointerFixups! This file may be broken", crashHere)
 		return offset
 	
 	def loadBaseSkeleton(self, skelPath):
@@ -1312,18 +1317,41 @@ class PakFile:
 			m_unk7 = bs.readUInt()
 			m_unk8 = bs.readUInt()
 			SubmeshesOffs = readPointerFixup()
-			MatHdrsOffs = bs.readUInt64()
+			LODDescsOffs = readPointerFixup()
 			ukn0 = bs.readUInt64()
-			ukn1 = bs.readUInt64()
-			ukn2 = bs.readUInt64()
+			textureDescsOffs = readPointerFixup()
+			shaderDescsOffs = readPointerFixup()
 			ukn3 = bs.readUInt64()
-			uknFloatsOffs = bs.readUInt64()
-			ukn4 = bs.readUInt64()
-			
-			bs.seek(SubmeshesOffs)
+			uknFloatsOffs = readPointerFixup()
+			materialDescsOffs = readPointerFixup()
 			
 			usedMaterials = {}
 			usedTextures = []
+			'''
+			for i in range(m_numLODs):
+				bs.seek(LODDescsOffs + 8*i)
+				bs.seek(readPointerFixup())
+				unknown = bs.readUInt()
+				submeshCount = bs.readUInt()
+				unknown64 = bs.readUInt64()
+				collectionName = readStringAt(bs, readPointerFixup())
+				firstSubmeshDescOffs = readPointerFixup()
+				uknBytesOffs = readPointerFixup()
+				submeshDescs = []
+				for s in range(submeshCount):
+					bs.seek(firstSubmeshDescOffs + 16*s)
+					submeshOffs = readPointerFixup()
+					submeshIdx = bs.readUInt()
+					submeshUkn = bs.readUInt()
+					bs.seek(submeshOffs + 8)
+					submeshName = readStringAt(bs, readPointerFixup()).split("|")
+					submeshName = submeshName[len(submeshName)-1]
+					submeshDescs.append(LODSubmeshDesc(name=submeshName,  address=firstSubmeshDescOffs + 16*s, offset=submeshOffs, index=submeshIdx))
+				self.lods.append(submeshDescs)
+			'''
+			#print("self.lods", self.lods)
+			
+			bs.seek(SubmeshesOffs)
 			
 			for i in range(m_numSubMeshDesc):
 			
@@ -1569,7 +1597,7 @@ class PakFile:
 				self.matNames.append(material.name)
 				
 				bs.seek(place)
-
+			
 			
 	def loadGeometry(self, startingBonesCt=0):
 		
@@ -1709,6 +1737,9 @@ def pakLoadModel(data, mdlList):
 	noesis.logPopup()
 	print("\n\n	Naughty Dog PAK model import", Version, "by alphaZomega\n")
 	
+	if noesis.optWasInvoked("-lods"):
+		dialogOptions.doLODs = True
+	
 	#Close existing dialog (if open)
 	if dialogOptions.dialog and dialogOptions.dialog.isOpen:
 		dialogOptions.dialog.isOpen = False
@@ -1838,6 +1869,9 @@ def pakWriteModel(mdl, bs):
 			
 	srcMesh = rapi.loadIntoByteArray(injectMeshName)
 	
+	if noesis.optWasInvoked("-lods"):
+		dialogOptions.doLODs = True
+	
 	f = NoeBitStream(srcMesh)
 	magic = readUIntAt(f, 0) 
 	if magic != 2681 and magic != 68217 and magic != 2147486329:
@@ -1952,11 +1986,8 @@ def pakWriteModel(mdl, bs):
 					if LODidx > lastLOD:
 						lastLOD = LODidx
 					if not dialogOptions.doLODs and LODidx > 0:
-						continue
-					
-					#if len(writeMesh.positions) == 3:
-					#	print("skipping")
-					#	continue
+						if len(writeMesh.positions) == 3:
+							continue
 					
 					print("Injecting ", writeMesh.name)
 					appendedPositions = appendedWeights = appendedIndices = isModded #False
@@ -2020,7 +2051,7 @@ def pakWriteModel(mdl, bs):
 							if foundUVs == 1 and writeMesh.uvs:
 								UVs = writeMesh.uvs
 							elif foundUVs == 2 and writeMesh.lmUVs:
-								UVs = writeMesh.uvs
+								UVs = writeMesh.lmUVs
 							elif foundUVs > 2 and writeMesh.uvxList and len(writeMesh.uvxList) > foundUVs-3:
 								UVs = writeMesh.uvxList[foundUVs-3]
 							
@@ -2201,7 +2232,7 @@ def pakWriteModel(mdl, bs):
 			if isNoesisSplit:
 				print("\nWARNING:	Duplicate mesh names detected! Check your FBX for naming or geometry issues. This pak may crash the game!\n")
 
-		#Set all LODs to read as LOD0:
+		#Set all LODs except the last one to read as LOD0:
 		if doWrite and not dialogOptions.doLODs:
 			f.seek(source.geoOffset[0] + source.geoOffset[1] + 44)
 			LODCount = f.readUInt()
@@ -2213,10 +2244,28 @@ def pakWriteModel(mdl, bs):
 				lodDescs.append(source.readPointerFixup())
 			firstLODSubmeshOffs = readUIntAt(f, lodDescs[0] + 24)
 			firstLODSubmeshCount = readUIntAt(f, lodDescs[0] + 4)
-			for a in range(1, LODCount):
+			for a in range(1, LODCount-1):
 				bs.seek(lodDescs[a] + 24)
 				bs.writeUInt64(firstLODSubmeshOffs)
 				writeUIntAt(bs, lodDescs[a] + 4, firstLODSubmeshCount)
+			'''
+			#Selectively set submeshes in the last LOD to point to their equivalents in the first one (for shadows / rendering):
+			subNamesDict = {}
+			for lodSubmeshDesc in newPak.lods[0]:
+				name = lodSubmeshDesc.name.split("_lod", 1)[0]
+				subNamesDict[name] = subNamesDict.get(name) or [] #these names arent consistent...
+				subNamesDict[name].append(lodSubmeshDesc)
+			
+			print("Dict", subNamesDict)
+			for lowLODSubmeshDesc in newPak.lods[len(newPak.lods)-1]:
+				name = lowLODSubmeshDesc.name.split("_lod0", 1)[0]
+				if subNamesDict.get(name):
+					lod0SubDesc = subNamesDict[name][0]
+					print("Changing low LOD submesh", lowLODSubmeshDesc.name, "into", lod0SubDesc.name)
+					newPak.changePointerFixup(lowLODSubmeshDesc.address, lod0SubDesc.offset, newPak.getPointerFixupPage(lowLODSubmeshDesc.address))
+					writeUIntAt(bs, lowLODSubmeshDesc.address+8, lod0SubDesc.index)
+					del subNamesDict[name][0]'''
+			
 				
 		#Embed image data
 		path = rapi.getDirForFilePath(rapi.getOutputName())+rapi.getLocalFileName(rapi.getOutputName()).split(".", 1)[0]
