@@ -1,6 +1,6 @@
 --Naughty Dog PAK Noesis CMD tool
---Version: v0.26
---Last Release: February 19 2023
+--Version: v0.27
+--Last Release: February 26 2023
 --Created by: alphaZomega 
 
 global noesis_path = "C:\\Program Files\\Noesis\\Noesis.exe"
@@ -189,7 +189,7 @@ rollout formNPDNoesisCMD "Noesis PAK v0.26" (
 					else (
 						HiddenDOSCommand ("\"" + cmd + " -logfile \"" + outtxt_path + "\"") startpath:(getFilenamePath noesis_path) donotwait:false
 					)
-					
+					print outtxt_path
 					waitForFileUnlock(fbx_path)
 					if showFbxOptions then (--chk_impPrompt
 						success = importFile fbx_path using:FBXIMP
@@ -201,6 +201,7 @@ rollout formNPDNoesisCMD "Noesis PAK v0.26" (
 					actionMan.executeAction 0 "40472" --open listener
 					
 					format "Import Command:\n%\n" cmd	
+					print "Something"
 						
 					if doesFileExist outtxt_path then (
 						local fs = openFile outtxt_path
@@ -211,8 +212,8 @@ rollout formNPDNoesisCMD "Noesis PAK v0.26" (
 							print noesisOutput
 							close fs
 							deletefile outtxt_path
-						)
-					)
+						) else format "Could not open %\n" outtxt_path
+					) else print "No Noesis log was found"
 					
 					if chk_delFBX.checked do (
 						deleteFile fbx_path
@@ -291,17 +292,18 @@ rollout formNPDNoesisCMD "Noesis PAK v0.26" (
 				)
 				
 				local copyNodes = #()
-				/*for obj in originalSelection where obj.modifiers[#Skin] != undefined do ( 
-					selectSkeleton obj
-					--Create dummy mesh with all bones in skin modifier so that FBX will save all bones
-					maxOps.cloneNodes obj cloneType:#copy newNodes:&copyNodes #nodialog
-					local lastSelection = (selection as array); select copyNodes[1]; copyNodes[1].name = "FBXBoneStorage"
-					for bn in lastSelection do 
-						if superclassof bn == Helper or classof bn == BoneGeometry then 
-							skinops.addBone copyNodes[1].modifiers[#Skin] bn 0
-					selectmore lastSelection
-					exit
-				)*/
+				if chk_writeBones.checked then
+					for obj in originalSelection where obj.modifiers[#Skin] != undefined do ( 
+						selectSkeleton obj
+						--Create dummy mesh with all bones in skin modifier so that FBX will save all bones
+						maxOps.cloneNodes obj cloneType:#copy newNodes:&copyNodes #nodialog
+						local lastSelection = (selection as array); select copyNodes[1]; copyNodes[1].name = "FBXBoneStorage"
+						for bn in lastSelection do 
+							if superclassof bn == Helper or classof bn == BoneGeometry then 
+								skinops.addBone copyNodes[1].modifiers[#Skin] bn 0
+						selectmore lastSelection
+						exit
+					)
 				
 
 				
@@ -338,7 +340,7 @@ rollout formNPDNoesisCMD "Noesis PAK v0.26" (
 				actionMan.executeAction 0 "40472" --open listener
 				
 				format "Export Command:\n%\n" cmd	
-					
+				
 				if doesFileExist outtxt_path then (
 					local fs = openFile outtxt_path
 					if fs != undefined then (

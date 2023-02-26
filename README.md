@@ -5,7 +5,7 @@ by alphaZomega
 
 ![plugin](https://i.imgur.com/oAzAv5A.png)
 
-This plugin previews Uncharted 4 and The Lost Legacy models from their pak files and can fetch textures for them as well.
+This plugin previews Uncharted 4, The Lost Legacy and The Last of Us Part II models from their pak files and can fetch textures for them as well.
 It can also create modified pak files for use in modding the game.
 Support for Naughty Dog games beyond Uncharted 4 is also possible in the future.
 
@@ -50,8 +50,10 @@ You can load multiple files at once using the plugin's GUI window, and select th
 - Import LODs:		  	Load lower detail LODs onto the model. Lower detail LODs will be disabled on exported paks with this option enabled
 - Convert Textures:	  	Convert normal maps to put normal X in the red channel and normal Y in the green channel (standard format). Also separates Occlusion maps from Normal maps and assigns them in Noesis preview.
 - Load All Textures:	Allows you to extract every texture in a pak, rather than just diffuse, transparency and normal maps
-- Game :				This menu lets you pick between using HD textures/skeletons from Uncharted 4 or The Lost Legacy, along with setting which one's Base Directory is used	
+- Game:					This menu lets you pick between using HD textures/skeletons from Uncharted 4 or The Lost Legacy, along with setting which one's Base Directory is used	
 - View: 				This menu lets you pick between viewing files / folders from the directory of the opened file or from the extracted Base Directory of your selected Game
+- Scale:				Lets you set the scale of the imported and exported model (default 100x)
+- Reparent Helpers:		Check this to change how 'helper' and 'grp' bones are parented, attaching them to main bones by name
 
 ## Injecting
 Once you have edited a model in your 3D program, you can inject it back into a copy of the same pak file it came from using Noesis 'File -> Export -> .pak - Naughty Dog PAK'
@@ -72,11 +74,6 @@ The resulting file will be injected with the new geometry and should work, but m
 When loading any pak model, its list of used textures will appear in the debug log.
 You can create a folder named after the file you are injecting and fill it with properly-encoded DDS files with the same filenames as from this list, and the plugin will grab those textures and embed them into the PAK.
 
-## Material Modding
-To edit materials, you will need to use my 010 Editor template, [nd_pak.bt ](https://github.com/alphazolam/nd_pak.bt)
-Navigate to PageData[0-3] -> GEOMETRY_1 -> Item -> SubmeshDescs, and edit the Material for your submesh. You can change important material parameters and you can modify which textures are loaded by swapping texStruct offsets in TexHeaders section.
-Edit material parameters on the vanilla copy of your pak file that you are repeatedly injecting for best results.
-
 #### Use the '-t' Advanced option to inject only textures, ignoring the mesh
 
 ![-t-option](https://i.imgur.com/0CEvcyC.png)
@@ -85,6 +82,11 @@ For example, when injecting "nadine-island-body.pak", create a folder called "na
 Even if you are not modding the mesh and only want to change textures, you still need to use an FBX to inject them.
 Check the Noesis debug log when exporting for the text "Checking for textures in \[path]" to see exactly where you need to put your dds files.
 *NORMAL MAPS should have AMBIENT OCCLUSION map in the RED channel, Normal X in the GREEN channel and Normal Y in the BLUE channel*
+
+## Material Modding
+To edit materials, you will need to use my 010 Editor template, [nd_pak.bt ](https://github.com/alphazolam/nd_pak.bt)
+Navigate to 'Page[0-3] -> GEOMETRY_1 -> Item -> Geometry -> SubmeshDescs -> [your submesh name] -> Material', and edit the Material for your submesh. You can change important material parameters and you can modify which textures are loaded by swapping texStruct offsets in TexHeaders section.
+Edit material parameters on the vanilla copy of your pak file that you are repeatedly injecting for best results.
 
 
 ## NDP_NOESIS_CMD Maxscript
@@ -111,5 +113,5 @@ For more support, join our Uncharted Modding discord at
 https://discord.gg/APQr5GgUeC
 
 
-Here is an example mod I made for Uncharted 4 using this plugin:
+Here is an example mod [Chris Redfield RE8](https://www.nexusmods.com/unchartedlegacyofthievescollection/mods/47) that I made for Uncharted 4 using this plugin (click image for video):
 [![ChrisModExample](https://i.imgur.com/b4b6Y6K.jpg)](https://youtu.be/iFkjbkle4JU)

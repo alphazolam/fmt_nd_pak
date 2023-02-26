@@ -1,7 +1,7 @@
-#fmt_nd_pak.py - Uncharted 4 ".pak" plugin for Rich Whitehouse's Noesis
-#Authors: alphaZomega 
+#fmt_nd_pak.py - Naughty Dog ".pak" plugin for Rich Whitehouse's Noesis
+#Author: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v1.31 (February 19, 2023)'
+Version = 'v1.4 (February 26, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -16,6 +16,7 @@ FlipUVs = False													# Flip UVs and flip texture images rightside-up (NOT
 LoadAllTextures = False											# Load all textures onto a model, rather than only color and normal maps
 ReadColors = False												# Read vertex colors
 PrintMaterialParams = False										# Print out all material parameters in the debug log when importing
+ReparentHelpers = False											# Parents helper bones based on their names, mostly for TLOU2 models
 texoutExt = ".dds"												# Extension of texture files (change to load textures of a specific type in Blender)
 gameName = "U4"													# Default game name
 
@@ -24,6 +25,7 @@ gameName = "U4"													# Default game name
 BaseDirectories = {
 	"TLL": "D:\\ExtractedGameFiles\\Uncharted4_data\\build\\pc\\thelostlegacy\\",
 	"U4": "D:\\ExtractedGameFiles\\Uncharted4_data\\build\\pc\\uncharted4\\",
+	"TLOU2": "D:\\ExtractedGameFiles\\root\\build\\ps4\\main\\",
 }
 
 from inc_noesis import *
@@ -33,8 +35,7 @@ import json
 import os
 import re
 import random
-
-
+import time
 
 class DialogOptions:
 	def __init__(self):
@@ -45,12 +46,15 @@ class DialogOptions:
 		self.doLODs = LoadAllLODs
 		self.loadAllTextures = LoadAllTextures
 		self.printMaterialParams = PrintMaterialParams
+		self.reparentHelpers = ReparentHelpers
 		self.readColors = ReadColors
 		self.baseSkeleton = None
 		self.width = 600
-		self.height = 800
+		self.height = 850
 		self.texDicts = None
 		self.gameName = gameName
+		self.currentDir = ""
+		self.isTLOU2 = False
 		self.dialog = None
 
 dialogOptions = DialogOptions()
@@ -87,6 +91,8 @@ def getGameName():
 		return "TLL"
 	if inName.find("\\uncharted4\\") != -1 or inName.find("u4") != -1: 
 		return "U4"
+	if inName.find("\\ps4\\main\\") != -1 or inName.find("tlou2") != -1: 
+		return "TLOU2"
 	return gameName
 
 def findNextOf(bs, integer, is64=False):
@@ -124,6 +130,9 @@ def findRootDir(path):
 	lostLegacyIdx = path.find("\\thelostlegacy\\")
 	if lostLegacyIdx != -1:
 		return path[:(lostLegacyIdx + 15)]
+	tlou2Idx = path.find("\\ps4\\main\\")
+	if lostLegacyIdx != -1:
+		return path[:(tlou2Idx + 10)]
 	return path
 
 def readFileBytes(filepath, address, size):
@@ -170,8 +179,7 @@ def encodeImageData(data, width, height, fmt):
 		mipCount += 1
 		
 	return outputData.getBuffer(), mipCount
-
-
+	
 def recombineNoesisMeshes(mdl):
 	
 	meshesBySourceName = {}
@@ -216,8 +224,12 @@ def recombineNoesisMeshes(mdl):
 		
 	return combinedMeshes
 
-fullGameNames = ["Uncharted 4", "The Lost Legacy"]
-gamesList = [ "U4", "TLL"]
+fullGameNames = ["Uncharted 4", "The Lost Legacy", "The Last of Us P2"]
+gamesList = [ "U4", "TLL", "TLOU2"]
+
+for gameName, path in BaseDirectories.items():
+	if path[(len(path)-1):] != "\\":
+		BaseDirectories[gameName] = path + "\\"
 
 skelFiles = {
 	"U4": [
@@ -310,7 +322,124 @@ skelFiles = {
 		"actor77\\train-locomotive-base.pak",
 		"actor77\\vin-base.pak",
 		"actor77\\waz-base.pak",
-	]
+	],
+	"TLOU2": [
+		"common\\actor97\\base-male-skel.pak",
+		"common\\actor97\\ellie-skel.pak",
+		"common\\actor97\\light-skel.pak",
+		"common\\actor97\\manual-upgrade-magazine-righthand-skel.pak",
+		"sp-common\\actor97\\ellie-festival-strand-hair-cloth-skel.pak",
+		"sp-common\\actor97\\ellie-santa-barbara-hair-cloth-skel.pak",
+		"sp-common\\actor97\\ellie-seattle-hoodie-string-skel.pak",
+		"sp-common\\actor97\\horse-main-rein-cloth-skel.pak",
+		"sp-common\\actor97\\horse-main-stirrups-skel.pak",
+		"sp-common\\actor97\\horse-mane-cloth-skel.pak",
+		"sp-common\\actor97\\horse-saddle-bag-straps-cloth-skel.pak",
+		"sp-common\\actor97\\horse-saddle-strap-cloth-skel.pak",
+		"sp-common\\actor97\\horse-tail-cloth-skel.pak",
+		"sp-common\\actor97\\lev-jacket-cloth-skel.pak",
+		"world-abby-fights-militia\\actor97\\scar-colin-skel.pak",
+		"world-abby-flashback-dad\\actor97\\marlene-skel.pak",
+		"world-abby-flashback-dad\\actor97\\zebra-baby-skel.pak",
+		"world-abby-flashback-dad\\actor97\\zebra-skel.pak",
+		"world-ellie-flashback-patrol\\actor97\\base-brute-male-skel.pak",
+		"world-ellie-flashback-patrol\\actor97\\bloater-skel.pak",
+		"world-ellie-flashback-patrol\\actor97\\infected-bloater-skel.pak",
+		"world-farm\\actor97\\base-kid-female-skel.pak",
+		"world-farm\\actor97\\festival-partner-skel.pak",
+		"world-farm\\actor97\\sheep-lamb-skel.pak",
+		"world-find-nora\\actor97\\base-brute-female-skel.pak",
+		"world-find-nora\\actor97\\bird-xlarge-skel-t2.pak",
+		"world-find-nora\\actor97\\frog-skel.pak",
+		"world-find-nora\\actor97\\med-hosp-skeleton-male-a.pak",
+		"world-find-nora\\actor97\\militia-whitney-skel.pak",
+		"world-find-nora\\actor97\\npc-brute-skel.pak",
+		"world-flashback-guitar\\actor97\\base-female-crowd-skel.pak",
+		"world-flashback-guitar\\actor97\\base-female-skel.pak",
+		"world-flashback-guitar\\actor97\\base-kid-skel.pak",
+		"world-flashback-guitar\\actor97\\base-male-crowd-skel.pak",
+		"world-flashback-guitar\\actor97\\base-teen-skel.pak",
+		"world-flashback-guitar\\actor97\\bird-medium-skel-t2.pak",
+		"world-flashback-guitar\\actor97\\dina-skel.pak",
+		"world-flashback-guitar\\actor97\\doe-skel.pak",
+		"world-flashback-guitar\\actor97\\door-skel.pak",
+		"world-flashback-guitar\\actor97\\drawer-skel.pak",
+		"world-flashback-guitar\\actor97\\ellie-14-skel.pak",
+		"world-flashback-guitar\\actor97\\guitar-skel.pak",
+		"world-flashback-guitar\\actor97\\horse-main-skel.pak",
+		"world-flashback-guitar\\actor97\\horse-skel.pak",
+		"world-flashback-guitar\\actor97\\jerry-skel.pak",
+		"world-flashback-guitar\\actor97\\jesse-skel.pak",
+		"world-flashback-guitar\\actor97\\joel-skel.pak",
+		"world-flashback-guitar\\actor97\\maria-skel.pak",
+		"world-flashback-guitar\\actor97\\t1-npc-normal-skel-old.pak",
+		"world-flashback-guitar\\actor97\\tommy-skel.pak",
+		"world-flooded-city\\actor97\\cab-high-skel-l.pak",
+		"world-flooded-city\\actor97\\military-truck-modern-skel.pak",
+		"world-flooded-city\\actor97\\young-abby-skel.pak",
+		"world-forward-base\\actor97\\bird-small-skel.pak",
+		"world-forward-base\\actor97\\bird-tiny-skel.pak",
+		"world-forward-base\\actor97\\chicken-skel.pak",
+		"world-forward-base\\actor97\\dog-crowd-skel.pak",
+		"world-forward-base\\actor97\\fish-skel-sml.pak",
+		"world-forward-base\\actor97\\halloween-skeleton-a-hanging.pak",
+		"world-forward-base\\actor97\\horse-crowd-skel.pak",
+		"world-forward-base\\actor97\\isaac-skel.pak",
+		"world-forward-base\\actor97\\militia-mannysdad-skel.pak",
+		"world-forward-base\\actor97\\scar-chris-skel.pak",
+		"world-forward-base\\actor97\\scar-emily-skel.pak",
+		"world-forward-base\\actor97\\sea-lion-skel.pak",
+		"world-forward-base\\actor97\\sheep-adult-skel.pak",
+		"world-medicine\\actor97\\abby-prisoner-skel.pak",
+		"world-medicine\\actor97\\med-hosp-skeleton-female-a.pak",
+		"world-medicine\\actor97\\ratking-bloater-skel.pak",
+		"world-medicine\\actor97\\ratking-stalker-scaled-skel.pak",
+		"world-medicine\\actor97\\ratking-stalker-skel.pak",
+		"world-patrol-chalet\\actor97\\jordan-skel.pak",
+		"world-patrol-jackson\\actor97\\abby-skel.pak",
+		"world-patrol-jackson\\actor97\\alice-skel.pak",
+		"world-patrol-jackson\\actor97\\base-baby-skel.pak",
+		"world-patrol-jackson\\actor97\\cow-skel.pak",
+		"world-patrol-jackson\\actor97\\dog-skel.pak",
+		"world-patrol-jackson\\actor97\\gustavo-skel.pak",
+		"world-patrol-jackson\\actor97\\leah-skel.pak",
+		"world-patrol-jackson\\actor97\\manny-skel.pak",
+		"world-patrol-jackson\\actor97\\mel-skel.pak",
+		"world-patrol-jackson\\actor97\\nick-skel.pak",
+		"world-patrol-jackson\\actor97\\nora-skel.pak",
+		"world-patrol-jackson\\actor97\\npc-normal-skel.pak",
+		"world-patrol-jackson\\actor97\\owen-skel.pak",
+		"world-patrol-jackson\\actor97\\seth-skel.pak",
+		"world-patrol\\actor97\\base-female-horde-skel.pak",
+		"world-patrol\\actor97\\cab-short-skel-r.pak",
+		"world-santa-barbara\\actor97\\prisoner-ian-skel.pak",
+		"world-santa-barbara\\actor97\\slaver-matthew-skel.pak",
+		"world-santa-barbara\\actor97\\slaver-ryan-skel.pak",
+		"world-saving-kids\\actor97\\bird-large-skel-t2.pak",
+		"world-saving-kids\\actor97\\carry-plank-skel.pak",
+		"world-saving-kids\\actor97\\lev-skel.pak",
+		"world-saving-kids\\actor97\\scar-reuben-skel.pak",
+		"world-saving-kids\\actor97\\yara-skel.pak",
+		"world-seattle-arrival\\actor97\\cab-short-skel-l.pak",
+		"world-seattle-arrival\\actor97\\cat-skel.pak",
+		"world-seattle-arrival\\actor97\\fish-skel-lrg.pak",
+		"world-seattle-arrival\\actor97\\manual-upgrade-skel.pak",
+		"world-seattle-arrival\\actor97\\mike-skel.pak",
+		"world-seattle-arrival\\actor97\\rifle-strap-inspect-skel.pak",
+		"world-theater\\actor97\\backpack-ellie-museum-skel.pak",
+		"world-theater\\actor97\\backpack-young-ellie-skel.pak",
+		"world-theater\\actor97\\bird-small-skel-t2.pak",
+		"world-theater\\actor97\\boar-skel.pak",
+		"world-theater\\actor97\\buck-skel.pak",
+		"world-theater\\actor97\\fish-skel-tiny.pak",
+		"world-tracking-horde\\actor97\\base-male-horde-skel.pak",
+		"world-tracking-horde\\actor97\\door-dbl-skel.pak",
+		"world-tracking\\actor97\\infected-skel.pak",
+		"world-tracking\\actor97\\rope14m-skel.pak",
+		"world-watchtower\\actor97\\cab-high-skel-r.pak",
+		"world-watchtower\\actor97\\hangmans-noose-2m-body-skel.pak",
+		"world-watchtower\\actor97\\shambler-skel.pak",
+	],
 }
 
 baseSkeletons = {
@@ -379,6 +508,123 @@ baseSkeletons = {
 		"throw": "actor77\\throwable-base.pak",
 		"vin": "actor77\\vin-base.pak",
 		"waz": "actor77\\waz-base.pak",
+	},
+	"TLOU2": {
+		"abby": "world-patrol-jackson\\actor97\\abby-skel.pak",
+		"abby-prisoner": "world-medicine\\actor97\\abby-prisoner-skel.pak",
+		"alice": "world-patrol-jackson\\actor97\\alice-skel.pak",
+		"backpack-ellie-museum": "world-theater\\actor97\\backpack-ellie-museum-skel.pak",
+		"backpack-young-ellie": "world-theater\\actor97\\backpack-young-ellie-skel.pak",
+		"base-baby": "world-patrol-jackson\\actor97\\base-baby-skel.pak",
+		"base-brute-female": "world-find-nora\\actor97\\base-brute-female-skel.pak",
+		"base-brute-male": "world-ellie-flashback-patrol\\actor97\\base-brute-male-skel.pak",
+		"base-female": "world-flashback-guitar\\actor97\\base-female-skel.pak",
+		"base-female-crowd": "world-flashback-guitar\\actor97\\base-female-crowd-skel.pak",
+		"base-female-horde": "world-patrol\\actor97\\base-female-horde-skel.pak",
+		"base-kid": "world-flashback-guitar\\actor97\\base-kid-skel.pak",
+		"base-kid-female": "world-farm\\actor97\\base-kid-female-skel.pak",
+		"base-male": "common\\actor97\\base-male-skel.pak",
+		"base-male-crowd": "world-flashback-guitar\\actor97\\base-male-crowd-skel.pak",
+		"base-male-horde": "world-tracking-horde\\actor97\\base-male-horde-skel.pak",
+		"base-teen": "world-flashback-guitar\\actor97\\base-teen-skel.pak",
+		"bird-large": "world-saving-kids\\actor97\\bird-large-skel-t2.pak",
+		"bird-medium-t2": "world-flashback-guitar\\actor97\\bird-medium-skel-t2.pak",
+		"bird-small": "world-forward-base\\actor97\\bird-small-skel.pak",
+		"bird-small": "world-theater\\actor97\\bird-small-skel-t2.pak",
+		"bird-tiny": "world-forward-base\\actor97\\bird-tiny-skel.pak",
+		"bird-xlarge-t2": "world-find-nora\\actor97\\bird-xlarge-skel-t2.pak",
+		"bloater": "world-ellie-flashback-patrol\\actor97\\bloater-skel.pak",
+		"boar": "world-theater\\actor97\\boar-skel.pak",
+		"buck": "world-theater\\actor97\\buck-skel.pak",
+		"cab-high": "world-watchtower\\actor97\\cab-high-skel-r.pak",
+		"cab-high-l": "world-flooded-city\\actor97\\cab-high-skel-l.pak",
+		"cab-short": "world-seattle-arrival\\actor97\\cab-short-skel-l.pak",
+		"cab-short-r": "world-patrol\\actor97\\cab-short-skel-r.pak",
+		"carry-plank": "world-saving-kids\\actor97\\carry-plank-skel.pak",
+		"cat": "world-seattle-arrival\\actor97\\cat-skel.pak",
+		"chicken": "world-forward-base\\actor97\\chicken-skel.pak",
+		"cow": "world-patrol-jackson\\actor97\\cow-skel.pak",
+		"dina": "world-flashback-guitar\\actor97\\dina-skel.pak",
+		"doe": "world-flashback-guitar\\actor97\\doe-skel.pak",
+		"dog": "world-patrol-jackson\\actor97\\dog-skel.pak",
+		"dog-crowd": "world-forward-base\\actor97\\dog-crowd-skel.pak",
+		"door": "world-flashback-guitar\\actor97\\door-skel.pak",
+		"door-dbl": "world-tracking-horde\\actor97\\door-dbl-skel.pak",
+		"drawer": "world-flashback-guitar\\actor97\\drawer-skel.pak",
+		"ellie": "common\\actor97\\ellie-skel.pak",
+		"ellie-14": "world-flashback-guitar\\actor97\\ellie-14-skel.pak",
+		"ellie-festival-strand-hair-cloth": "sp-common\\actor97\\ellie-festival-strand-hair-cloth-skel.pak",
+		"ellie-santa-barbara-hair-cloth": "sp-common\\actor97\\ellie-santa-barbara-hair-cloth-skel.pak",
+		"ellie-seattle-hoodie-string": "sp-common\\actor97\\ellie-seattle-hoodie-string-skel.pak",
+		"festival-partner": "world-farm\\actor97\\festival-partner-skel.pak",
+		"fish": "world-seattle-arrival\\actor97\\fish-skel-lrg.pak",
+		"fish-sml": "world-forward-base\\actor97\\fish-skel-sml.pak",
+		"fish-tiny": "world-theater\\actor97\\fish-skel-tiny.pak",
+		"frog": "world-find-nora\\actor97\\frog-skel.pak",
+		"guitar": "world-flashback-guitar\\actor97\\guitar-skel.pak",
+		"gustavo": "world-patrol-jackson\\actor97\\gustavo-skel.pak",
+		"halloween-a-hanging": "world-forward-base\\actor97\\halloween-skeleton-a-hanging.pak",
+		"hangmans-noose-2m": "world-watchtower\\actor97\\hangmans-noose-2m-body-skel.pak",
+		"horse": "world-flashback-guitar\\actor97\\horse-skel.pak",
+		"horse-crowd": "world-forward-base\\actor97\\horse-crowd-skel.pak",
+		"horse-main": "world-flashback-guitar\\actor97\\horse-main-skel.pak",
+		"horse-main-rein-cloth": "sp-common\\actor97\\horse-main-rein-cloth-skel.pak",
+		"horse-main-stirrups": "sp-common\\actor97\\horse-main-stirrups-skel.pak",
+		"horse-mane-cloth": "sp-common\\actor97\\horse-mane-cloth-skel.pak",
+		"horse-saddle-bag-straps-cloth": "sp-common\\actor97\\horse-saddle-bag-straps-cloth-skel.pak",
+		"horse-saddle-strap-cloth": "sp-common\\actor97\\horse-saddle-strap-cloth-skel.pak",
+		"horse-tail-cloth": "sp-common\\actor97\\horse-tail-cloth-skel.pak",
+		"infected-bloater": "world-ellie-flashback-patrol\\actor97\\infected-bloater-skel.pak",
+		"infected-skel": "world-tracking\\actor97\\infected-skel.pak",
+		"isaac": "world-forward-base\\actor97\\isaac-skel.pak",
+		"jerry": "world-flashback-guitar\\actor97\\jerry-skel.pak",
+		"jesse": "world-flashback-guitar\\actor97\\jesse-skel.pak",
+		"joel": "world-flashback-guitar\\actor97\\joel-skel.pak",
+		"jordan": "world-patrol-chalet\\actor97\\jordan-skel.pak",
+		"leah": "world-patrol-jackson\\actor97\\leah-skel.pak",
+		"lev": "world-saving-kids\\actor97\\lev-skel.pak",
+		"lev-jacket-cloth": "sp-common\\actor97\\lev-jacket-cloth-skel.pak",
+		"light": "common\\actor97\\light-skel.pak",
+		"manny": "world-patrol-jackson\\actor97\\manny-skel.pak",
+		"manual-upgrade": "world-seattle-arrival\\actor97\\manual-upgrade-skel.pak",
+		"manual-upgrade-magazine-righthand": "common\\actor97\\manual-upgrade-magazine-righthand-skel.pak",
+		"maria": "world-flashback-guitar\\actor97\\maria-skel.pak",
+		"marlene": "world-abby-flashback-dad\\actor97\\marlene-skel.pak",
+		"med-hosp-female-a": "world-medicine\\actor97\\med-hosp-skeleton-female-a.pak",
+		"med-hosp-male-a": "world-find-nora\\actor97\\med-hosp-skeleton-male-a.pak",
+		"mel": "world-patrol-jackson\\actor97\\mel-skel.pak",
+		"mike": "world-seattle-arrival\\actor97\\mike-skel.pak",
+		"military-truck-modern": "world-flooded-city\\actor97\\military-truck-modern-skel.pak",
+		"militia-mannysdad": "world-forward-base\\actor97\\militia-mannysdad-skel.pak",
+		"militia-whitney": "world-find-nora\\actor97\\militia-whitney-skel.pak",
+		"nick": "world-patrol-jackson\\actor97\\nick-skel.pak",
+		"nora": "world-patrol-jackson\\actor97\\nora-skel.pak",
+		"npc-brute": "world-find-nora\\actor97\\npc-brute-skel.pak",
+		"npc-normal": "world-patrol-jackson\\actor97\\npc-normal-skel.pak",
+		"owen": "world-patrol-jackson\\actor97\\owen-skel.pak",
+		"prisoner-ian": "world-santa-barbara\\actor97\\prisoner-ian-skel.pak",
+		"ratking-bloater": "world-medicine\\actor97\\ratking-bloater-skel.pak",
+		"ratking-stalker": "world-medicine\\actor97\\ratking-stalker-skel.pak",
+		"ratking-stalker-scaled": "world-medicine\\actor97\\ratking-stalker-scaled-skel.pak",
+		"rifle-strap-inspect": "world-seattle-arrival\\actor97\\rifle-strap-inspect-skel.pak",
+		"rope14m": "world-tracking\\actor97\\rope14m-skel.pak",
+		"scar-chris": "world-forward-base\\actor97\\scar-chris-skel.pak",
+		"scar-colin": "world-abby-fights-militia\\actor97\\scar-colin-skel.pak",
+		"scar-emily": "world-forward-base\\actor97\\scar-emily-skel.pak",
+		"scar-reuben": "world-saving-kids\\actor97\\scar-reuben-skel.pak",
+		"sea-lion": "world-forward-base\\actor97\\sea-lion-skel.pak",
+		"seth": "world-patrol-jackson\\actor97\\seth-skel.pak",
+		"shambler": "world-watchtower\\actor97\\shambler-skel.pak",
+		"sheep-adult": "world-forward-base\\actor97\\sheep-adult-skel.pak",
+		"sheep-lamb": "world-farm\\actor97\\sheep-lamb-skel.pak",
+		"slaver-matthew": "world-santa-barbara\\actor97\\slaver-matthew-skel.pak",
+		"slaver-ryan": "world-santa-barbara\\actor97\\slaver-ryan-skel.pak",
+		"t1-npc-normal-old": "world-flashback-guitar\\actor97\\t1-npc-normal-skel-old.pak",
+		"tommy": "world-flashback-guitar\\actor97\\tommy-skel.pak",
+		"yara": "world-saving-kids\\actor97\\yara-skel.pak",
+		"young-abby": "world-flooded-city\\actor97\\young-abby-skel.pak",
+		"zebra": "world-abby-flashback-dad\\actor97\\zebra-skel.pak",
+		"zebra-baby": "world-abby-flashback-dad\\actor97\\zebra-baby-skel.pak",
 	},
 }
 
@@ -476,44 +722,157 @@ dxFormat = {
 
 gdRawDataStarts = {
 	"U4": {
-		"global-dict.pak":  940048,
-		"global-dict-1.pak":  1083904,
-		"global-dict-2.pak":  959456,
-		"global-dict-3.pak":  1041088,
-		"global-dict-4.pak":  924576,
-		"global-dict-5.pak":  1013456,
-		"global-dict-6.pak":  781216,
-		"global-dict-7.pak":  740640,
-		"global-dict-8.pak":  853104,
-		"global-dict-9.pak":  551888,
-		"global-dict-10.pak":  301056,
-		"global-dict-11.pak":  923936,
-		"global-dict-12.pak":  850656,
-		"global-dict-13.pak":  839584,
-		"global-dict-14.pak":  229456,
-		"global-dict-15.pak":  227216,
-		"global-dict-16.pak":  277968,
-		"global-dict-17.pak":  192960,
-		"global-dict-18.pak":  448832,
-		"global-dict-19.pak":  506752,
-		"global-dict-20.pak":  391920,
+		"All": {
+			"global-dict.pak":  940048,
+			"global-dict-1.pak":  1083904,
+			"global-dict-2.pak":  959456,
+			"global-dict-3.pak":  1041088,
+			"global-dict-4.pak":  924576,
+			"global-dict-5.pak":  1013456,
+			"global-dict-6.pak":  781216,
+			"global-dict-7.pak":  740640,
+			"global-dict-8.pak":  853104,
+			"global-dict-9.pak":  551888,
+			"global-dict-10.pak":  301056,
+			"global-dict-11.pak":  923936,
+			"global-dict-12.pak":  850656,
+			"global-dict-13.pak":  839584,
+			"global-dict-14.pak":  229456,
+			"global-dict-15.pak":  227216,
+			"global-dict-16.pak":  277968,
+			"global-dict-17.pak":  192960,
+			"global-dict-18.pak":  448832,
+			"global-dict-19.pak":  506752,
+			"global-dict-20.pak":  391920,
+		},
 	},
 	"TLL": {
-		"global-dict.pak": 1040608,
-		"global-dict-1.pak": 949568,
-		"global-dict-2.pak": 1081104,
-		"global-dict-3.pak": 574688,
-		"global-dict-4.pak": 748944,
-		"global-dict-5.pak": 546608,
-		"global-dict-6.pak": 1074032,
-		"global-dict-7.pak": 911984,
-		"global-dict-8.pak": 247632,
-		"global-dict-9.pak": 131072,
-		"global-dict-10.pak": 140048,
-		"global-dict-11.pak": 488656,
-		"global-dict-12.pak": 79440,
-	}
+		"All": {
+			"global-dict.pak": 1040608,
+			"global-dict-1.pak": 949568,
+			"global-dict-2.pak": 1081104,
+			"global-dict-3.pak": 574688,
+			"global-dict-4.pak": 748944,
+			"global-dict-5.pak": 546608,
+			"global-dict-6.pak": 1074032,
+			"global-dict-7.pak": 911984,
+			"global-dict-8.pak": 247632,
+			"global-dict-9.pak": 131072,
+			"global-dict-10.pak": 140048,
+			"global-dict-11.pak": 488656,
+			"global-dict-12.pak": 79440,
+		},
+	},
+	"TLOU2": {
+		"common": {
+			"common-dict.pak": 617216,
+		},
+		"sp-common": {
+			"sp-common-dict.pak": 1117024,
+		},
+		"world-abby-ellie-fight": {
+			"world-abby-ellie-fight-dict.pak": 328144,
+		},
+		"world-abby-fights-militia": {
+			"world-abby-fights-militia-dict.pak": 535872,
+		},
+		"world-abby-flashback-dad": {
+			"world-abby-flashback-dad-dict.pak": 323760,
+		},
+		"world-amputation": {
+			"world-amputation-dict.pak": 274256,
+		},
+		"world-ellie-flashback-museum": {
+			"world-ellie-flashback-museum-dict.pak": 508400,
+		},
+		"world-ellie-flashback-patrol": {
+			"world-ellie-flashback-patrol-dict.pak": 252752,
+		},
+		"world-ellie-flashback-ultimatum": {
+			"world-ellie-flashback-ultimatum-dict.pak": 198304,
+		},
+		"world-epilogue": {
+			"world-epilogue-dict.pak": 12448,
+		},
+		"world-farm": {
+			"world-farm-dict.pak": 617776,
+		},
+		"world-find-aquarium": {
+			"world-find-aquarium-dict.pak": 205712,
+		},
+		"world-find-nora": {
+			"world-find-nora-dict-1.pak": 548432,
+			"world-find-nora-dict.pak": 1065968,
+		},
+		"world-flashback-guitar": {
+			"world-flashback-guitar-dict-1.pak": 1639248,
+			"world-flashback-guitar-dict-2.pak": 148448,
+			"world-flashback-guitar-dict.pak": 1811392,
+		},
+		"world-flooded-city": {
+			"world-flooded-city-dict.pak": 1540400,
+		},
+		"world-forward-base": {
+			"world-forward-base-dict-1.pak": 858688,
+			"world-forward-base-dict.pak": 1570704,
+		},
+		"world-game-start": {
+			"world-game-start-dict.pak": 544,
+		},
+		"world-jordan-escape": {
+			"world-jordan-escape-dict.pak": 1065920,
+		},
+		"world-medicine": {
+			"world-medicine-dict-1.pak": 291872,
+			"world-medicine-dict.pak": 1281248,
+		},
+		"world-patrol": {
+			"world-patrol-dict.pak": 1046272,
+		},
+		"world-patrol-chalet": {
+			"world-patrol-chalet-dict.pak": 380128,
+		},
+		"world-patrol-departure": {
+			"world-patrol-departure-dict.pak": 259680,
+		},
+		"world-patrol-jackson": {
+			"world-patrol-jackson-dict.pak": 1737472,
+		},
+		"world-rescue-jesse": {
+			"world-rescue-jesse-dict.pak": 1281008,
+		},
+		"world-santa-barbara": {
+			"world-santa-barbara-dict.pak": 1102624,
+		},
+		"world-save-lev": {
+			"world-save-lev-dict.pak": 909840,
+		},
+		"world-saving-kids": {
+			"world-saving-kids-dict.pak": 655632,
+		},
+		"world-seattle-arrival": {
+			"world-seattle-arrival-dict.pak": 1914512,
+		},
+		"world-theater": {
+			"world-theater-dict.pak": 200752,
+		},
+		"world-theater-ambush": {
+			"world-theater-ambush-dict.pak": 138256,
+		},
+		"world-tracking": {
+			"world-tracking-dict.pak": 656848,
+		},
+		"world-tracking-horde": {
+			"world-tracking-horde-dict.pak": 257840,
+		},
+		"world-watchtower": {
+			"world-watchtower-dict-1.pak": 655024,
+			"world-watchtower-dict.pak": 1854112,
+		},
+	},
 }
+		
+DoubleClickTimer = namedtuple("DoubleClickTimer", "name idx timer")
 
 class openOptionsDialogWindow:
 	
@@ -530,6 +889,7 @@ class openOptionsDialogWindow:
 		self.localRoot = findRootDir(self.path)
 		self.baseDir = BaseDirectories[gameName] 
 		self.allFiles = []
+		self.pakFiles = []
 		self.subDirs = []
 		self.pakIdx = 0
 		self.baseIdx = -1
@@ -540,12 +900,9 @@ class openOptionsDialogWindow:
 		self.isOpen = True
 		self.isCancelled = False
 		self.isStarted = False
-		self.firstBaseDir = ""
-		if os.path.isdir(self.baseDir):
-			for item in os.listdir(self.baseDir):
-				if os.path.isdir(os.path.join(self.baseDir, item)):
-					self.firstBaseDir = item
-					if item == "actor77": break
+		dialogOptions.currentDir = self.localDir
+		self.currentDirTxt = dialogOptions.currentDir
+		self.clicker = DoubleClickTimer(name="", idx=0, timer=0)
 		dialogOptions.dialog = self
 		
 	def setWidthAndHeight(self, width=dialogOptions.width, height=dialogOptions.width):
@@ -562,63 +919,75 @@ class openOptionsDialogWindow:
 		#self.pak.dumpGlobalVramHashes()
 		self.noeWnd.closeWindow()
 		
-	def selectDirListItem(self, noeWnd, controlId, wParam, lParam):
-		if self.dirList.getSelectionIndex() == -1:
+	def openOptionsButtonParentDir(self, noeWnd, controlId, wParam, lParam):
+		if self.localIdx == 0: 
+			self.localRoot = os.path.dirname(self.localRoot)
+		else:
+			self.baseDir = os.path.dirname(self.baseDir)
+		self.setDirList()
+		self.setPakList()
+		if self.subDirs:
 			self.dirList.selectString(self.subDirs[0])
-		if self.dirIdx != self.dirList.getSelectionIndex() and dialogOptions.currentDir != self.dirList.getStringForIndex(self.dirList.getSelectionIndex()):
-			self.dirIdx = self.dirList.getSelectionIndex()
-			dialogOptions.currentDir = self.dirList.getStringForIndex(self.dirIdx)
-			self.setDirList()
-			self.setPakList()
 	
 	def selectBaseListItem(self, noeWnd, controlId, wParam, lParam):
 		self.baseIdx = self.baseList.getSelectionIndex()
 		dialogOptions.baseSkeleton = self.baseList.getStringForIndex(self.baseIdx)
 		
 	def selectPakListItem(self, noeWnd, controlId, wParam, lParam):
-		if self.pakIdx != self.pakList.getSelectionIndex() and self.pakList.getStringForIndex(self.pakList.getSelectionIndex()) not in self.loadItems: #and self.pakIdx != -1 
-			self.pakIdx = self.pakList.getSelectionIndex()
-			item = self.pakList.getStringForIndex(self.pakIdx)
-			if item:
-				self.loadItems.append(item)
+		self.pakIdx = self.pakList.getSelectionIndex()
+		if self.clicker.name == "pakList" and self.pakIdx == self.clicker.idx and time.time() - self.clicker.timer < 0.25:
+			if self.pakIdx == 0: #parent directory
+				if dialogOptions.currentDir[-1:] == "\\":
+					dialogOptions.currentDir = os.path.dirname(dialogOptions.currentDir)
+				dialogOptions.currentDir = os.path.dirname(dialogOptions.currentDir)
+				self.setPakList()
+			elif self.pakIdx <= len(self.subDirs):
+				dialogOptions.currentDir += "\\" + self.pakList.getStringForIndex(self.pakIdx)
+				self.setPakList()
+			elif self.pakList.getStringForIndex(self.pakIdx) not in self.loadItems:
+				self.loadItems.append(self.pakList.getStringForIndex(self.pakIdx))
 				self.loadList.addString(self.pakList.getStringForIndex(self.pakIdx))
 				self.loadItems = sorted(self.loadItems)
-				#self.loadList.selectString(self.pakList.getStringForIndex(self.pakIdx))
-				#self.loadIdx = self.loadList.getSelectionIndex()
-		self.pakIdx = self.pakList.getSelectionIndex()
+		self.clicker = DoubleClickTimer(name="pakList", idx=self.pakIdx, timer=time.time())
 	
 	def selectLoadListItem(self, noeWnd, controlId, wParam, lParam):
 		self.loadIdx = self.loadList.getSelectionIndex()
-		if self.loadIdx != -1 and self.loadIdx < len(self.loadItems) and self.loadItems[self.loadIdx] != self.name:
+		if self.clicker.name == "loadList" and self.loadIdx == self.clicker.idx and time.time() - self.clicker.timer < 0.25 and self.loadItems[self.loadIdx] != self.name:
 			self.loadList.removeString(self.loadItems[self.loadIdx])
 			del self.loadItems[self.loadIdx]
 			self.loadIdx = self.loadIdx if self.loadIdx < len(self.loadItems) else self.loadIdx - 1
 			self.loadList.selectString(self.loadItems[self.loadIdx])
+		self.clicker = DoubleClickTimer(name="loadList", idx=self.loadIdx, timer=time.time())
 	
 	def selectGameBoxItem(self, noeWnd, controlId, wParam, lParam):
 		global gameName
 		if self.gameIdx != self.gameBox.getSelectionIndex():
 			self.gameIdx = self.gameBox.getSelectionIndex()
 			gameName = gamesList[self.gameIdx]
+			restOfPath = dialogOptions.currentDir.replace(self.baseDir, "")
+			self.baseDir = BaseDirectories[gameName]
 			if self.localBox.getStringForIndex(self.localIdx) == "Base Directory":
-				self.baseDir = BaseDirectories[gameName]
-				self.firstBaseDir = ""
-				if os.path.isdir(self.baseDir):
-					for item in os.listdir(self.baseDir):
-						if os.path.isdir(os.path.join(self.baseDir, item)):
-							self.firstBaseDir = item
-							if item == "actor77": break
-				self.setDirList()
+				dialogOptions.currentDir = self.baseDir
+				if restOfPath and os.path.isdir(self.baseDir + restOfPath):
+					dialogOptions.currentDir = self.baseDir + restOfPath
 				self.setPakList()
-				self.setLoadList()
 				
 	def selectLocalBoxItem(self, noeWnd, controlId, wParam, lParam):
 		if self.localIdx != self.localBox.getSelectionIndex():
 			self.localIdx = self.localBox.getSelectionIndex()
-			self.setDirList()
+			restOfPath = dialogOptions.currentDir.replace(self.localRoot, "").replace(self.baseDir, "")
+			if self.localBox.getStringForIndex(self.localIdx) == "Base Directory":
+				dialogOptions.currentDir = self.baseDir
+				if restOfPath and os.path.isdir(self.baseDir + restOfPath):
+					dialogOptions.currentDir = self.baseDir + restOfPath
+			else:
+				dialogOptions.currentDir = os.path.dirname(self.path)
+				if restOfPath and os.path.isdir(self.localRoot + restOfPath):
+					dialogOptions.currentDir = self.localRoot + restOfPath
 			self.setPakList()
 			
 	def setBaseList(self, list_object=None, current_item=None):
+		#current_item = current_item or baseSkeletons[gameName]["chloe" if gameName == "TLL" else "ellie" if gameName=="TLOU2" else "hero"]
 		for path in skelFiles[gameName]:
 			self.baseList.addString(path)
 		lastFoundHint = ""
@@ -665,6 +1034,10 @@ class openOptionsDialogWindow:
 		dialogOptions.loadAllTextures = not dialogOptions.loadAllTextures
 		self.loadAllTexCheckbox.setChecked(dialogOptions.loadAllTextures)
 		
+	def checkReparentCheckbox(self, noeWnd, controlId, wParam, lParam):
+		dialogOptions.reparentHelpers = not dialogOptions.reparentHelpers
+		self.reparentCheckbox.setChecked(dialogOptions.reparentHelpers)
+		
 	def setLoadList(self):
 		for item in self.loadItems:
 			self.loadList.removeString(item)
@@ -673,48 +1046,48 @@ class openOptionsDialogWindow:
 		self.loadList.selectString(self.pak.path or rapi.getInputName())
 		
 	def setPakList(self):
-		dirName = self.localDir if self.localIdx == 0 else self.baseDir + (dialogOptions.currentDir or self.firstBaseDir)
-		if os.path.isdir(dirName):
-			for name in self.allFiles:
-				self.pakList.removeString(name)
-			self.allFiles = []
-			for item in os.listdir(dirName):
-				if os.path.isfile(os.path.join(dirName, item)) and item.find(".pak") != -1:
-					self.allFiles.append(item)
-					self.pakList.addString(item)
-			self.allFiles = sorted(self.allFiles)	
-			if self.name in self.allFiles:
-				self.pakIdx = self.allFiles.index(self.name)
-				self.pakList.selectString(self.name)
-		
-	def setDirList(self):
-		dirName = self.localRoot if self.localIdx == 0 else self.baseDir
-		parentFolder = os.path.dirname(dirName)
-		for name in self.subDirs:
-			self.dirList.removeString(name)
+		for name in self.allFiles:
+			self.pakList.removeString(name)
+		self.allFiles = [".."]
+		self.pakFiles = []
 		self.subDirs = []
-		for folderName in os.listdir(parentFolder):
-			if os.path.isdir(os.path.join(parentFolder, folderName)):
-				self.subDirs.append(folderName)
-				self.dirList.addString(folderName)
-		#self.subDirs = sorted(self.subDirs) #wtf why does THIS one not need to be sorted?
-		for folderName in self.subDirs:
-			if not self.isStarted and self.localIdx == 0 and self.localDir.find(folderName) != -1:
-				self.dirList.selectString(folderName)
-				self.dirIdx = self.dirList.getSelectionIndex()
-				dialogOptions.currentDir = folderName	
-				break
-		if self.localIdx == 1:
-			self.dirList.selectString(self.subDirs[self.dirIdx])
-			dialogOptions.currentDir = self.subDirs[self.dirIdx]
+		for item in os.listdir(dialogOptions.currentDir):
+			if os.path.isdir(os.path.join(dialogOptions.currentDir, item)):
+				self.subDirs.append(item)
+			if os.path.isfile(os.path.join(dialogOptions.currentDir, item)) and item.find(".pak") != -1:
+				self.pakFiles.append(item)
+		self.subDirs = sorted(self.subDirs)
+		self.pakFiles = sorted(self.pakFiles)
+		self.allFiles.extend(self.subDirs)
+		self.allFiles.extend(self.pakFiles)
+		for item in self.allFiles:
+			self.pakList.addString(item)
+		if self.name in self.allFiles:
+			self.pakIdx = self.allFiles.index(self.name)
+			self.pakList.selectString(self.name)
+		elif self.pakIdx < len(self.allFiles):
+			self.pakList.selectString(self.pakList.getStringForIndex(self.pakIdx))
 		else:
-			self.dirIdx = self.dirList.getSelectionIndex()
-			if self.dirIdx == -1:
-				self.dirIdx = 0
-				self.dirList.selectString(0)
-			dialogOptions.currentDir = self.dirList.getStringForIndex(self.dirIdx)
+			self.pakIdx = 0
+			self.pakList.selectString(self.pakList.getStringForIndex(0))
+		self.currentDirEditBox.setText(dialogOptions.currentDir)
 		
-		
+	def inputCurrentDirEditBox(self, noeWnd, controlId, wParam, lParam):
+		if self.currentDirEditBox.getText() != dialogOptions.currentDir and os.path.isdir(self.currentDirEditBox.getText()):
+			dialogOptions.currentDir = self.currentDirEditBox.getText()
+			self.setPakList()
+			
+	def inputGlobalScaleEditBox(self, noeWnd, controlId, wParam, lParam):
+		global GlobalScale
+		try:
+			if self.globalScaleEditBox.getText():
+				newScale = float(self.globalScaleEditBox.getText())
+				if newScale:
+					GlobalScale = newScale
+		except ValueError:
+			print("Non-numeric scale input, resetting to ", GlobalScale)
+			self.globalScaleEditBox.setText(str(GlobalScale))
+			
 	def create(self, width=dialogOptions.width, height=dialogOptions.height):
 		self.noeWnd = noewin.NoeUserWindow("Naughty Dog .pak Tool:        " + rapi.getLocalFileName(self.name), "HTRAWWindowClass", width, height) 
 		noeWindowRect = noewin.getNoesisWindowRect()
@@ -723,42 +1096,41 @@ class openOptionsDialogWindow:
 			self.noeWnd.x = noeWindowRect[0] + windowMargin
 			self.noeWnd.y = noeWindowRect[1] + windowMargin  
 		return self.noeWnd.createWindow()
-		
+	
 	def createPakWindow(self, width=dialogOptions.width, height=dialogOptions.height):
 		
 		if self.create(width, height):
 			self.noeWnd.setFont("Futura", 14)
 			
-			self.noeWnd.createStatic("Base:", 10, 5, width-20, 20)
+			self.noeWnd.createStatic("Base:", 10, 7, width-20, 20)
 			index = self.noeWnd.createComboBox(50, 5, width-65, 20, self.selectBaseListItem, noewin.CBS_DROPDOWNLIST) #CB
 			self.baseList = self.noeWnd.getControlByIndex(index)
 			
-			
 			self.noeWnd.createStatic("Files from:", 5, 45, width-20, 20)
-			index = self.noeWnd.createComboBox(80, 40, width-95, 20, self.selectDirListItem, noewin.CBS_DROPDOWNLIST) #CB
-			self.dirList = self.noeWnd.getControlByIndex(index)
+			index = self.noeWnd.createEditBox(5, 65, width-20, 45, dialogOptions.currentDir, self.inputCurrentDirEditBox, False) #EB
+			self.currentDirEditBox = self.noeWnd.getControlByIndex(index)
 			
-			
-			index = self.noeWnd.createListBox(5, 70, width-20, 400, self.selectPakListItem, noewin.CBS_DROPDOWNLIST) #LB
+			#LBS_NOTIFY | WS_VSCROLL | WS_BORDER
+			index = self.noeWnd.createListBox(5, 120, width-20, 380, self.selectPakListItem, noewin.LBS_NOTIFY | noewin.WS_VSCROLL | noewin.WS_BORDER) #LB
 			self.pakList = self.noeWnd.getControlByIndex(index)
 			
-			self.noeWnd.createStatic("Files to load:", 5, 485, width-20, 20)
-			index = self.noeWnd.createListBox(5, 505, width-20, 150, self.selectLoadListItem, noewin.CBS_DROPDOWNLIST) #LB
+			self.noeWnd.createStatic("Files to load:", 5, 505, width-20, 20)
+			index = self.noeWnd.createListBox(5, 525, width-20, 150, self.selectLoadListItem, noewin.CBS_DROPDOWNLIST) #LB
 			self.loadList = self.noeWnd.getControlByIndex(index)
 			
 			
 			if True:
-				index = self.noeWnd.createCheckBox("Load Textures", 10, 665, 130, 30, self.checkLoadTexCheckbox)
+				index = self.noeWnd.createCheckBox("Load Textures", 10, 685, 130, 30, self.checkLoadTexCheckbox)
 				self.loadTexCheckbox = self.noeWnd.getControlByIndex(index)
 				self.loadTexCheckbox.setChecked(dialogOptions.doLoadTex)
 				
 				
-				index = self.noeWnd.createCheckBox("Load All Textures", 140, 665, 160, 30, self.checkLoadAllTexCheckbox)
+				index = self.noeWnd.createCheckBox("Load All Textures", 150, 685, 160, 30, self.checkLoadAllTexCheckbox)
 				self.loadAllTexCheckbox = self.noeWnd.getControlByIndex(index)
 				self.loadAllTexCheckbox.setChecked(dialogOptions.loadAllTextures)
 				
 				
-				index = self.noeWnd.createCheckBox("Convert Textures", 10, 695, 130, 30, self.checkConvTexCheckbox)
+				index = self.noeWnd.createCheckBox("Convert Textures", 10, 715, 130, 30, self.checkConvTexCheckbox)
 				self.convTexCheckbox = self.noeWnd.getControlByIndex(index)
 				self.convTexCheckbox.setChecked(dialogOptions.doConvertTex)
 				
@@ -768,32 +1140,36 @@ class openOptionsDialogWindow:
 				#self.flipUVsCheckbox.setChecked(dialogOptions.doFlipUVs)
 				
 				
-				index = self.noeWnd.createCheckBox("Load Base", 140, 695, 90, 30, self.checkBaseCheckbox)
+				index = self.noeWnd.createCheckBox("Load Base", 150, 715, 90, 30, self.checkBaseCheckbox)
 				self.loadBaseCheckbox = self.noeWnd.getControlByIndex(index)
 				self.loadBaseCheckbox.setChecked(dialogOptions.doLoadBase)
 				
+				index = self.noeWnd.createCheckBox("Reparent Helpers", 10, 750, 130, 20, self.checkReparentCheckbox)
+				self.reparentCheckbox = self.noeWnd.getControlByIndex(index)
+				self.reparentCheckbox.setChecked(dialogOptions.reparentHelpers)
 				
-				index = self.noeWnd.createCheckBox("Import LODs", 270, 695, 100, 30, self.checkLODsCheckbox)
+				index = self.noeWnd.createCheckBox("Import LODs", 150, 745, 100, 30, self.checkLODsCheckbox)
 				self.LODsCheckbox = self.noeWnd.getControlByIndex(index)
 				self.LODsCheckbox.setChecked(dialogOptions.doLODs)
 				
 
-			self.noeWnd.createStatic("Game:", width-198, 670, 60, 20)
-			index = self.noeWnd.createComboBox(width-150, 665, 130, 20, self.selectGameBoxItem, noewin.CBS_DROPDOWNLIST) #CB
+			self.noeWnd.createStatic("Game:", width-218, 690, 60, 20)
+			index = self.noeWnd.createComboBox(width-170, 685, 150, 20, self.selectGameBoxItem, noewin.CBS_DROPDOWNLIST) #CB
 			self.gameBox = self.noeWnd.getControlByIndex(index)
 			
-			
-			self.noeWnd.createStatic("View:", width-190, 700, 60, 20)
-			index = self.noeWnd.createComboBox(width-150, 695, 130, 20, self.selectLocalBoxItem, noewin.CBS_DROPDOWNLIST) #CB
+			self.noeWnd.createStatic("View:", width-210, 720, 60, 20)
+			index = self.noeWnd.createComboBox(width-170, 715, 150, 20, self.selectLocalBoxItem, noewin.CBS_DROPDOWNLIST) #CB
 			self.localBox = self.noeWnd.getControlByIndex(index)
 			
+			self.noeWnd.createStatic("Scale:", width-215, 750, 60, 20)
+			index = self.noeWnd.createEditBox(width-170, 750, 80, 20, str(GlobalScale), self.inputGlobalScaleEditBox, False) #EB
+			self.globalScaleEditBox = self.noeWnd.getControlByIndex(index)
 			
 			self.noeWnd.createButton("Load", 5, height-70, width-160, 30, self.openOptionsButtonLoadEntry)
 			self.noeWnd.createButton("Cancel", width-96, height-70, 80, 30, self.openOptionsButtonCancel)
 			
 			self.setLoadList()
-			self.setBaseList(self.baseList, baseSkeletons[gameName]["chloe" if gameName == "TLL" else "hero"])
-			self.setDirList()
+			self.setBaseList(self.baseList)
 			self.setPakList()
 			self.setGameBox(self.gameBox)
 			self.setLocalBox(self.localBox)
@@ -801,13 +1177,14 @@ class openOptionsDialogWindow:
 			
 			self.noeWnd.doModal()
 			
-			
 
 LODSubmeshDesc = namedtuple("LODSubmeshDesc", "name address offset index")
 
 JointsInfo = namedtuple("JointsInfo", "transformsStart parentingStart")
 
 StreamDesc = namedtuple("StreamDesc", "type offset stride bufferOffsetAddr")
+
+T2StreamDesc = namedtuple("T2StreamDesc", "type offset stride bufferOffsetAddr sizes qScale qOffs numVerts")
 
 SkinDesc = namedtuple("SkinDesc", "mapOffset weightsOffset weightCount mapOffsetAddr weightOffsetAddr")
 
@@ -823,6 +1200,7 @@ class PakSubmesh:
 		self.nrmRecalcDesc = nrmRecalcDesc
 		self.facesOffset = facesOffset
 		self.facesOffsetAddr = facesOffsetAddr
+		self.bbox = []
 
 class PakFile:
 	def __init__(self, bs, args={}):
@@ -872,7 +1250,7 @@ class PakFile:
 			pageId = self.getPointerFixupPage(readAddr)
 			if pageId != None:
 				return offset + self.pakPageEntries[pageId][0]
-			print("ReadAddr not found in PointerFixups!", readAddr, pageIdm)
+			print("ReadAddr not found in PointerFixups!", readAddr)
 			print("ReadAddr not found in PointerFixups! This file may be broken", crashHere)
 		return offset
 	
@@ -893,22 +1271,50 @@ class PakFile:
 			jsons[fileName][hash] = subTuple[0]
 			
 	def dumpGlobalVramHashes(self):
-		file = open(noesis.getPluginsPath() + "python\\TLLTextureHashes.json") or {}
-		jsons = json.load(file) if file else {}
-		root = os.path.dirname(dialogOptions.dialog.localDir[:-1])+"\\textureDict2\\"
-		
-		for fileName in os.listdir(root):
-			if fileName.find("global-dict")  != -1 and fileName not in jsons:
-				dictPak = PakFile(NoeBitStream(rapi.loadIntoByteArray(root + fileName)), {"path": root + fileName})
-				pageCt = readUIntAt(dictPak.bs, 16)
-				dictPak.bs.seek(readUIntAt(dictPak.bs, 20)+12*(pageCt-1))
-				rawDataAddr = dictPak.bs.readUInt() + dictPak.bs.readUInt()
-				gdRawDataStarts[gameName][fileName] = rawDataAddr
-				print("\"" + fileName, ": " + str(rawDataAddr) + "," )
-				dictPak.readPak()
-				dictPak.makeVramHashJson(jsons)
-				with open(noesis.getPluginsPath() + "python\\TLLTextureHashes.json", "w") as outfile:
-					json.dump(jsons, outfile)
+		output = ""
+		try:
+			jsons = json.load(open(noesis.getPluginsPath() + "python\\NDTextureHashes.json"))
+		except:
+			jsons = {}
+		jsons[gameName] = jsons.get(gameName) or {}
+		if gameName == "TLOU2":
+			gameDir = BaseDirectories["TLOU2"]
+			for folderName in os.listdir(gameDir+"\\"):
+				if os.path.isdir(os.path.join(gameDir, folderName)) and os.path.isdir(os.path.join(gameDir, folderName + "\\texturedict3")):
+					root = os.path.join(gameDir, folderName + "\\texturedict3\\")
+					jsons[gameName][folderName] = jsons[gameName].get(folderName) or {} 
+					suboutput = ""
+					for fileName in os.listdir(root):
+						if fileName.find("-dict")  != -1 and fileName not in jsons[gameName][folderName]:
+							dictPak = PakFile(NoeBitStream(rapi.loadIntoByteArray(root + fileName)), {"path": root + fileName})
+							pageCt = readUIntAt(dictPak.bs, 16)
+							dictPak.bs.seek(readUIntAt(dictPak.bs, 20)+12*(pageCt-1))
+							rawDataAddr = dictPak.bs.readUInt() + dictPak.bs.readUInt()
+							gdRawDataStarts[gameName][folderName] = gdRawDataStarts[gameName].get(folderName) or {}
+							gdRawDataStarts[gameName][folderName][fileName] = rawDataAddr
+							suboutput += "\n    \"" + fileName + "\": " + str(rawDataAddr) + "," 
+							dictPak.readPak()
+							dictPak.makeVramHashJson(jsons[gameName][folderName])
+							with open(noesis.getPluginsPath() + "python\\NDTextureHashes.json", "w") as outfile:
+								json.dump(jsons, outfile)
+					output += "\n\"" + folderName + "\": {" + suboutput + "\n},"
+			print("\nGlobal dict start offsets:\n", output)
+		else:
+			root = os.path.dirname(dialogOptions.dialog.localDir[:-1])+"\\textureDict2\\"
+			print("Dumping textures json...")
+			for fileName in os.listdir(root):
+				if fileName.find("global-dict")  != -1 and fileName not in jsons:
+					dictPak = PakFile(NoeBitStream(rapi.loadIntoByteArray(root + fileName)), {"path": root + fileName})
+					pageCt = readUIntAt(dictPak.bs, 16)
+					dictPak.bs.seek(readUIntAt(dictPak.bs, 20)+12*(pageCt-1))
+					rawDataAddr = dictPak.bs.readUInt() + dictPak.bs.readUInt()
+					gdRawDataStarts[gameName][fileName] = rawDataAddr
+					output = output + "\n\"" + fileName, ": " + str(rawDataAddr) + "," 
+					dictPak.readPak()
+					dictPak.makeVramHashJson(jsons)
+					with open(noesis.getPluginsPath() + "python\\NDTextureHashes.json", "w") as outfile:
+						json.dump(jsons, outfile)
+			print("Texture Dict Start Offsets:\n", output, "\n")
 	
 	def writeVRAMImage(self, vramOffset, filepath):
 		
@@ -1002,73 +1408,101 @@ class PakFile:
 		imgFormat = bs.readUInt()
 		field_2C = bs.readUInt()
 		m_mipCount = bs.readUInt()
-		m_width = bs.readUInt()
-		m_height = bs.readUInt()
+		width = bs.readUInt()
+		height = bs.readUInt()
 		field_3C = bs.readUInt()
 		m_streamFlags = bs.readUInt()
-		
 		texFileName = self.vrams[m_hash][1]
 		texPath = readStringAt(bs, bs.tell()+12)
+		
 		bigVramOffset = None
-		for fileName, subDict in self.texDict.items():
-			if rapi.checkFileExists(BaseDirectories[gameName] + "texturedict2\\" + fileName):
-				bigVramOffset = subDict.get(str(m_hash))
+		bigVramDictFile = ""
+		worldName = "All"
+		
+		if gameName == "TLOU2":
+			for worldFolderName, worldDict in self.texDict.items():
+				for fileName, subDict in worldDict.items(): 
+					if rapi.checkFileExists(BaseDirectories[gameName] + "\\" + worldFolderName + "\\texturedict3\\" + fileName):
+						bigVramOffset = subDict.get(str(m_hash))
+						if bigVramOffset: 
+							bigVramDictFile = BaseDirectories[gameName] + "\\" + worldFolderName + "\\texturedict3\\" + fileName
+							worldName = worldFolderName
+							break
 				if bigVramOffset: break
+		else:
+			for fileName, subDict in self.texDict.items():
+				if rapi.checkFileExists(BaseDirectories[gameName] + "texturedict2\\" + fileName):
+					bigVramOffset = subDict.get(str(m_hash))
+					if bigVramOffset: 
+						bigVramDictFile = BaseDirectories[gameName] + "texturedict2\\" + fileName
+						break
+		
 				
 		if bigVramOffset: 
-			vramBytes = readFileBytes(BaseDirectories[gameName] + "texturedict2\\" + fileName, bigVramOffset, 1024)
+			vramBytes = readFileBytes(bigVramDictFile, bigVramOffset, 1024)
 			vramStream = NoeBitStream(vramBytes)
 			offset = readUIntAt(vramStream, 40)
-			m_width = readUIntAt(vramStream, 84)
-			m_height = readUIntAt(vramStream, 88)
+			width = readUIntAt(vramStream, 84)
+			height = readUIntAt(vramStream, 88)
 			vramSize = readUIntAt(vramStream, 48)
 			imgFormat = readUIntAt(vramStream, 72)
-			print("VRAM texture hash found!", fileName, '{:02X}'.format(m_hash), texFileName) #offset + gdRawDataStarts[gameName][fileName], m_width, m_height, vramSize, imgFormat, "\n", texFileName)
-			imageData = readFileBytes(BaseDirectories[gameName] + "texturedict2\\" + fileName, offset + gdRawDataStarts[gameName][fileName], vramSize)
+			print("VRAM texture hash found!", fileName, '{:02X}'.format(m_hash), texFileName) #offset + gdRawDataStarts[gameName][worldName][fileName], width, height, vramSize, imgFormat, "\n", texFileName)
+			imageData = readFileBytes(bigVramDictFile, offset + gdRawDataStarts[gameName][worldName][fileName], vramSize)
 		else:
 			print("Texture hash not found in json:", m_hash, "\n", texFileName)
 			bs.seek(pakOffset + self.pakPageEntries[len(self.pakPageEntries)-1][0] + self.pakPageEntries[len(self.pakPageEntries)-1][1])
 			imageData = bs.readBytes(vramSize)
 			
 		fmtName = dxFormat.get(imgFormat) or ""
+		bpp = 4 if (fmtName.find("Bc1") != -1 or fmtName.find("Bc4") != -1) else 8
+		
+		if dialogOptions.isTLOU2:
+			imageData = rapi.callExtensionMethod("untile_1dthin", imageData, width, height, bpp, 1)
 		
 		if fmtName.find("Bc1") != -1:
-			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_DXT1)
+			texData = rapi.imageDecodeDXT(imageData, width, height, noesis.FOURCC_DXT1)
+			bpp = 4
 		elif fmtName.find("Bc3") != -1:
-			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC3)
+			texData = rapi.imageDecodeDXT(imageData, width, height, noesis.FOURCC_BC3)
 		elif fmtName.find("Bc4") != -1:
-			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC4)
+			texData = rapi.imageDecodeDXT(imageData, width, height, noesis.FOURCC_BC4)
+			bpp = 4
 		elif fmtName.find("Bc5") != -1:
-			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC5)
+			texData = rapi.imageDecodeDXT(imageData, width, height, noesis.FOURCC_BC5)
 		elif fmtName.find("Bc6") != -1: 
-			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC6H)
+			texData = rapi.imageDecodeDXT(imageData, width, height, noesis.FOURCC_BC6H)
 		elif fmtName.find("Bc7") != -1: 
-			texData = rapi.imageDecodeDXT(imageData, m_width, m_height, noesis.FOURCC_BC7)
+			texData = rapi.imageDecodeDXT(imageData, width, height, noesis.FOURCC_BC7)
 			if dialogOptions.doConvertTex: 
 				if exTexName.find("_NoesisAO") != -1:
-					texData = rapi.imageEncodeRaw(texData, m_width, m_height, "r8r8r8")
-					texData = rapi.imageDecodeRaw(texData, m_width, m_height, "r8g8b8")
+					texData = rapi.imageEncodeRaw(texData, width, height, "r8r8r8")
+					texData = rapi.imageDecodeRaw(texData, width, height, "r8g8b8")
 					texFileName = exTexName
 				elif texFileName.find("-ao") != -1 or texFileName.find("-occlusion") != -1:
-					texData = rapi.imageEncodeRaw(texData, m_width, m_height, "g16b16")
-					texData = rapi.imageDecodeRaw(texData, m_width, m_height, "r16g16")
+					texData = rapi.imageEncodeRaw(texData, width, height, "g16b16")
+					texData = rapi.imageDecodeRaw(texData, width, height, "r16g16")
 		elif re.search("[RGBA]\d\d?", fmtName):
 			fmtName = fmtName.split("_")[0].lower()
 			print("RGBA: ", fmtName)
 			try:
-				texData = rapi.imageDecodeRaw(imageData, m_width, m_height, fmtName)
+				texData = rapi.imageDecodeRaw(imageData, width, height, fmtName)
 			except:
 				print("Failed to decode raw image type", fmtName)
 		else:
 			print("Error: Unsupported texture type: " + str(imgFormat) + "  " + fmtName)
 			return []
 			
-		return NoeTexture(texFileName, m_width, m_height, texData, noesis.NOESISTEX_RGBA32)
+		#if dialogOptions.isTLOU2:
+		#	texData = rapi.imageFromMortonOrder(texData, width, height)
+			
+		return NoeTexture(texFileName, width, height, texData, noesis.NOESISTEX_RGBA32)
 			
 		print("Failed to locate texture dict", path)
 		return []
 	
 	def readPakHeader(self):
+	
+		global dialogOptions
 		
 		print ("Reading", self.path or rapi.getInputName())
 		readPointerFixup = self.readPointerFixup
@@ -1109,16 +1543,19 @@ class PakFile:
 			self.pointerPageIds[pointerOffs + self.pakPageEntries[m_page1Idx][0]] = (m_page2Idx, bs.tell()-6)
 			
 		self.jointOffset = self.geoOffset = None
-		
-		self.vramDicts = None
 		self.vrams = {}
 		
-		file = open(noesis.getPluginsPath() + "python\\UC4TextureHashes.json")
-		#try:
-		dialogOptions.texDicts = dialogOptions.texDicts or (json.load(file) if file else {})
+		if rapi.checkFileExists(noesis.getPluginsPath() + "python\\NDTextureHashes.json"):
+			file = open(noesis.getPluginsPath() + "python\\NDTextureHashes.json")
+			dialogOptions.texDicts = dialogOptions.texDicts or json.load(file)
+		else:
+			dialogOptions.texDicts = {}
+		
+		for name in gamesList:
+			dialogOptions.texDicts[name] = dialogOptions.texDicts.get(name) or {}
 		self.texDict = dialogOptions.texDicts[gameName]
-		#except:
-		#	print("Failed to load json", jsonPath)
+		
+		dialogOptions.isTLOU2 = False
 		
 		for p, pageEntry in enumerate(self.pakPageEntries):
 			
@@ -1140,6 +1577,10 @@ class PakFile:
 				m_itemTypeOffset = bs.readUInt64()
 				m_itemType = readStringAt(bs, m_itemTypeOffset+start)
 				
+				dialogOptions.isTLOU2 = dialogOptions.isTLOU2 or (readUIntAt(bs, bs.tell()+16)==74565)
+				if dialogOptions.isTLOU2:
+					m_resItemOffset += 16
+					
 				self.entriesList.append(PakEntry(type=m_itemType, offset = m_resItemOffset))
 				
 				if m_itemType == "VRAM_DESC":
@@ -1150,13 +1591,9 @@ class PakFile:
 					texName = splitted[0] + texoutExt
 					if len(splitted) > 1:
 						if texName in vramNames:
-							texName = (splitted[0] + "_" + splitted[1]).replace(".ndb", texoutExt)
+							texName = (splitted[0] + "_" + splitted[1]).replace(".ndb", texoutExt) #add hash to duplicate texture names
 						vramNames[texName] = True
 						self.vrams[texHash] = [m_resItemOffset + start, texName, [], None]
-					
-					if getattr(self, "vramDicts") and texHash not in self.vramDicts[key]:
-						self.vramDicts[key][texHash] = m_resItemOffset + start + self.startAddr
-						bs.seek(m_resItemOffset + start)
 				
 				if m_itemType == "JOINT_HIERARCHY":
 					self.jointOffset = (m_resItemOffset, start)
@@ -1273,17 +1710,17 @@ class PakFile:
 					self.boneList.append(NoeBone(startBoneIdx + b, boneNames[b], mainBoneMats[self.boneMap.index(b)], None, parentList[b][1]))
 				else:
 					splitted = boneNames[b].split("_")
-					matchedName = boneNames[b].replace("_"+splitted[len(splitted)-1], "")
+					endName = splitted[len(splitted)-1]
+					matchedName = boneNames[b].replace("_" + endName, "")#.replace("_runtime", "")
 					bFound = False
 					mat = identity
 					if parentList[b][3] != -1 and parentList[b][3] in self.boneMap: #parentList[b][3] < len(self.boneMap) and self.boneMap[parentList[b][3]] < len(mainBoneMats):
 						mat = mainBoneMats[self.boneMap[parentList[b][3]]]
-					
 					for j, bId in enumerate(self.boneMap):
 						if boneNames[bId].find(matchedName) != -1:
 							bFound = True
 							self.boneList.append(NoeBone(startBoneIdx + b, boneNames[b], mat, None, parentList[b][1]))
-							if parentList[b][1] == -1:
+							if parentList[b][1] == -1 or (dialogOptions.reparentHelpers and (endName == "helper" or endName == "grp")):
 								self.boneList[len(self.boneList)-1].parentIndex = bId
 							break
 					if not bFound:
@@ -1351,81 +1788,135 @@ class PakFile:
 			'''
 			#print("self.lods", self.lods)
 			
-			bs.seek(SubmeshesOffs)
+			
 			
 			for i in range(m_numSubMeshDesc):
-			
-				field_0 = bs.readUInt()
-				field_4 = bs.readUInt()
-				m_nameOffset = readPointerFixup()
-				field_10 = bs.readUInt()
-				field_14 = bs.readUInt()
-				field_18 = bs.readUInt()
-				field_1C = bs.readUInt()
-				field_20 = bs.readUInt()
-				m_numVertexes = bs.readUInt()
-				m_numIndexes = bs.readUInt()
-				m_numStreamSource = bs.readUInt()
-				m_numDefaultStreams = bs.readInt()
-				field_34 = bs.readUInt()
-				m_pStreamDesc = readPointerFixup()
-				field_40 = bs.readUInt()
-				field_44 = bs.readUInt()
-				facesOffsetAddr = bs.tell()
-				m_pIndexes = readPointerFixup()
-				m_material = readPointerFixup()
-				m_numMaterialInstances = bs.readUInt()
-				field_5C = bs.readUInt()
-				field_60 = bs.readUInt()
-				field_64 = bs.readUInt()
-				skindataOffset = readPointerFixup()
-				field_70 = bs.readUInt()
-				field_74 = bs.readUInt()
-				field_78 = bs.readUInt()
-				field_7C = bs.readUInt()
-				field_80 = bs.readUInt()
-				field_84 = bs.readUInt()
-				nrmRecalcDescOffsOffset = bs.tell()
-				nrmRecalcDescOffs = readPointerFixup()
-				field_90 = bs.readUInt()
-				field_94 = bs.readUInt()
-				field_98 = bs.readUInt()
-				field_9C = bs.readUInt()
-				field_A0 = bs.readUInt()
-				field_A4 = bs.readUInt()
-				field_A8 = bs.readUInt()
-				field_AC = bs.readUInt()
+				bs.seek(SubmeshesOffs + 176*i)
+				if dialogOptions.isTLOU2:
+					bbox = [[bs.readFloat(), bs.readFloat(), bs.readFloat(), bs.readFloat()], [bs.readFloat(), bs.readFloat(), bs.readFloat(), bs.readFloat()]]
+					submeshName = readStringAt(bs, readPointerFixup()).split("|")
+					submeshName = submeshName[len(submeshName)-1]
+					ukn64_0 = bs.readUInt64()
+					m_pStreamDesc = readPointerFixup()
+					ukn64_1 = bs.readUInt64()
+					facesOffsetAddr = bs.tell()
+					m_pIndexes = readPointerFixup()
+					m_material = readPointerFixup()
+					ukn64_2 = bs.readUInt64()
+					skindataOffset = readPointerFixup()
+					ukn64_3 = bs.readUInt64()
+					ukn64_4 = bs.readUInt64()
+					nrmRecalcDescOffsOffset = bs.tell()
+					nrmRecalcDescOffs = readPointerFixup()
+					uknStringOffs = bs.readUInt64()
+					m_numVertexes = bs.readUInt()
+					m_numIndexes = bs.readUInt()
+					m_numStreamSource = bs.readUInt()
+					m_numDefaultStreams = bs.readUInt()
+					ukn32_0 = bs.readUInt()
+					ukn32_1 = bs.readUInt()
+					ukn64_5 = bs.readUInt64()
+					ukn32_2 = bs.readUInt()
+					ukn32_3 = bs.readUInt()
+					ukn32_4 = bs.readUInt()
+					ukn32_5 = bs.readUInt()
+				else:
+					field_0 = bs.readUInt()
+					field_4 = bs.readUInt()
+					submeshName = readStringAt(bs, readPointerFixup()).split("|")
+					submeshName = submeshName[len(submeshName)-1]
+					field_10 = bs.readUInt()
+					field_14 = bs.readUInt()
+					field_18 = bs.readUInt()
+					field_1C = bs.readUInt()
+					field_20 = bs.readUInt()
+					m_numVertexes = bs.readUInt()
+					m_numIndexes = bs.readUInt()
+					m_numStreamSource = bs.readUInt()
+					m_numDefaultStreams = bs.readInt()
+					field_34 = bs.readUInt()
+					m_pStreamDesc = readPointerFixup()
+					field_40 = bs.readUInt()
+					field_44 = bs.readUInt()
+					facesOffsetAddr = bs.tell()
+					m_pIndexes = readPointerFixup()
+					m_material = readPointerFixup()
+					m_numMaterialInstances = bs.readUInt()
+					field_5C = bs.readUInt()
+					field_60 = bs.readUInt()
+					field_64 = bs.readUInt()
+					skindataOffset = readPointerFixup()
+					field_70 = bs.readUInt()
+					field_74 = bs.readUInt()
+					field_78 = bs.readUInt()
+					field_7C = bs.readUInt()
+					field_80 = bs.readUInt()
+					field_84 = bs.readUInt()
+					nrmRecalcDescOffsOffset = bs.tell()
+					nrmRecalcDescOffs = readPointerFixup()
+					field_90 = bs.readUInt()
+					field_94 = bs.readUInt()
+					field_98 = bs.readUInt()
+					field_9C = bs.readUInt()
+					field_A0 = bs.readUInt()
+					field_A4 = bs.readUInt()
+					field_A8 = bs.readUInt()
+					field_AC = bs.readUInt()
 				
 				place = bs.tell()
-				submeshName = readStringAt(bs, m_nameOffset).split("|")
-				submeshName = submeshName[len(submeshName)-1]
 				streamDescs = []
 				
 				for j in range(m_numStreamSource):
 					
-					bs.seek(m_pStreamDesc + 24*j)
-					m_numAttributes = bs.readUByte()
-					m_unk  = bs.readUByte()
-					m_stride  = bs.readUShort()
-					m_unk2 = bs.readUByte()
-					m_unk3 = bs.readUByte()
-					m_unk4 = bs.readUShort()
-					m_compInfoOffs = readPointerFixup()
-					buffOffsAddr = bs.tell()
-					m_bufferOffset = readPointerFixup()
-					
-					bs.seek(m_compInfoOffs)
-					
-					m_unkC0 = bs.readUByte()
-					m_unkC1 = bs.readUByte()
-					m_unkC2 = bs.readUByte()
-					m_compType = bs.readUByte()
-					
-					streamDescs.append(StreamDesc(type=m_compType, offset=m_bufferOffset, stride=m_stride, bufferOffsetAddr=buffOffsAddr))
+					if dialogOptions.isTLOU2:
+						bs.seek(m_pStreamDesc + 64*j)
+						buffOffsAddr = bs.tell()
+						m_bufferOffset = readPointerFixup()
+						numVerts = bs.readUInt()
+						uknInt = bs.readUInt()
+						bufferSize = bs.readUInt()
+						
+						m_compType = bs.readUByte()
+						m_unk2 = bs.readUByte()
+						m_unk3 = bs.readBits(4)
+						m_stride = bs.readBits(4)
+						m_unk4 = bs.readUByte()
+						sizes = [bs.readUByte(), bs.readUByte(), bs.readUByte(), bs.readUByte()]
+						
+						uknInt0 = bs.readUInt()
+						qScale = NoeVec4((bs.readFloat(), bs.readFloat(), bs.readFloat(), bs.readFloat()))# * 10000
+						
+						qOffs = NoeVec4((bs.readFloat(), bs.readFloat(), bs.readFloat(), bs.readFloat()))
+						bs.readFloat()
+						
+						streamDescs.append(T2StreamDesc(type=m_compType, offset=m_bufferOffset, stride=m_stride, bufferOffsetAddr=buffOffsAddr, sizes=sizes, qScale=qScale, qOffs=qOffs, numVerts=numVerts))
+					else:
+						bs.seek(m_pStreamDesc + 24*j)
+						m_numAttributes = bs.readUByte()
+						m_unk  = bs.readUByte()
+						m_stride  = bs.readUShort()
+						m_unk2 = bs.readUByte()
+						m_unk3 = bs.readUByte()
+						m_unk4 = bs.readUShort()
+						m_compInfoOffs = readPointerFixup()
+						buffOffsAddr = bs.tell()
+						m_bufferOffset = readPointerFixup()
+						
+						bs.seek(m_compInfoOffs)
+						
+						m_unkC0 = bs.readUByte()
+						m_unkC1 = bs.readUByte()
+						m_unkC2 = bs.readUByte()
+						m_compType = bs.readUByte()
+						
+						streamDescs.append(StreamDesc(type=m_compType, offset=m_bufferOffset, stride=m_stride, bufferOffsetAddr=buffOffsAddr))
 				
 				self.submeshes.append(PakSubmesh(submeshName, m_numVertexes, m_numIndexes, m_pIndexes, streamDescs))
 				self.submeshes[i].facesOffsetAddr = facesOffsetAddr
-				self.submeshes[i].streamsAddr = m_compInfoOffs
+				if dialogOptions.isTLOU2:
+					self.submeshes[i].bbox = bbox
+				
+				self.submeshes[i].streamsAddr = m_compInfoOffs if not dialogOptions.isTLOU2 else None
 				
 				if nrmRecalcDescOffs:
 					bs.seek(nrmRecalcDescOffs)
@@ -1449,21 +1940,34 @@ class PakFile:
 					weightsOffs = readPointerFixup()
 					
 					self.submeshes[i].skinDesc = SkinDesc(mapOffset=bIndicesOffs, weightsOffset=weightsOffs, weightCount=numWeights, mapOffsetAddr=bs.tell()-16, weightOffsetAddr=bs.tell()-8)
-				
-				
+					
 				bs.seek(m_material)
 				shaderAssetNameOffs = readPointerFixup()
 				shaderTypeOffs = readPointerFixup()
-				shaderOptions0Offs = readPointerFixup()
-				hashCodeOffs = readPointerFixup()
-				shaderParamsOffs = readPointerFixup()
-				texDescsListOffs = readPointerFixup()
-				shaderOptions3Offs = readPointerFixup()
 				
-				nameCount = bs.readUInt()
-				paramCount = bs.readUInt()
-				texCount = bs.readUInt()
-				unkCount = bs.readUInt()
+				
+				if dialogOptions.isTLOU2:
+					UUID = bs.readUInt64()
+					shaderParamsOffs = readPointerFixup()
+					texDescsListOffs = readPointerFixup()
+					shaderNamesOffs = readPointerFixup()
+					uknOffs = readPointerFixup()
+					fetchMapDescsOffs = readPointerFixup()
+					bs.seek(52*4, 1)
+					paramCount = bs.readUInt()
+					texCount = bs.readUInt()
+					nameCount = bs.readUInt()
+					fetchMapCount = bs.readUInt()
+				else:
+					shaderOptions0Offs = readPointerFixup()
+					hashCodeOffs = readPointerFixup()
+					shaderParamsOffs = readPointerFixup()
+					texDescsListOffs = readPointerFixup()
+					shaderOptions3Offs = readPointerFixup()
+					nameCount = bs.readUInt()
+					paramCount = bs.readUInt()
+					texCount = bs.readUInt()
+					unkCount = bs.readUInt()
 				
 				matName = readStringAt(bs, shaderAssetNameOffs)
 				matType = readStringAt(bs, shaderTypeOffs)
@@ -1476,13 +1980,14 @@ class PakFile:
 					#materialFlags = 0
 					material.setDefaultBlend(0)
 					material.setSpecularColor(NoeVec4([0.5, 0.5, 0.5, 32.0])) 
+					secondaryDiffuse = []
 					loadedDiffuse = loadedNormal = loadedTrans = loadedSpec = loadedMetal = loadedRoughness = False
 					
 					for j in range(texCount):
-						bs.seek(texDescsListOffs + 40*j)
+						bs.seek(texDescsListOffs + (40+8*dialogOptions.isTLOU2)*j )
 						nameAddr = readPointerFixup()
 						name = readStringAt(bs, nameAddr)
-						bs.seek(8,1) #path = readStringAt(bs, readPointerFixup())
+						bs.seek(8+8*dialogOptions.isTLOU2,1) #path = readStringAt(bs, readPointerFixup())
 						bs.seek(readPointerFixup())
 						path = readStringAt(bs, readPointerFixup())
 						vramHash = bs.readUInt64()
@@ -1493,7 +1998,6 @@ class PakFile:
 							if not loadedDiffuse and name.find("BaseColor01") != -1:
 								doSet = loadedDiffuse = vramHash 
 								material.setTexture(texFileName)
-								
 							elif not loadedNormal and (name.find("Normal01") != -1 or name.find("NR") != -1):
 								doSet = loadedNormal = vramHash
 								material.setNormalTexture(texFileName)
@@ -1522,6 +2026,8 @@ class PakFile:
 								doSet = loadedSpec = vramHash
 								material.setSpecularTexture(texFileName)
 								#material.flags |= noesis.NMATFLAG_PBR_SPEC
+							elif not secondaryDiffuse and name.find("Color01") != -1:
+								secondaryDiffuse = [texFileName, vramHash]
 								
 						'''if dialogOptions.doConvertTex and not loadedSpec :
 							if  (name.find("LinearBlend0") != -1 or name.find("ME") != -1): #not loadedMetal and
@@ -1552,7 +2058,13 @@ class PakFile:
 						if doSet and texFileName and texFileName not in usedTextures:
 							self.vramHashes.append(vramHash)
 							usedTextures.append(texFileName)
-							
+					
+					if not loadedDiffuse and secondaryDiffuse:
+						material.setTexture(secondaryDiffuse[0])
+						if secondaryDiffuse[0] not in usedTextures:
+							self.vramHashes.append(secondaryDiffuse[1])
+							usedTextures.append(secondaryDiffuse[0])
+					
 					params = {}
 					setBaseColor = setSpecScale = setRoughness = setMetal = False
 					outstring = "\n" + matKey + "material parameters:"
@@ -1653,34 +2165,61 @@ class PakFile:
 				for j, sd in enumerate(sm.streamDescs):
 				
 					bs.seek(sd.offset)
-					
-					#Positions
-					if j == 0:
-						rapi.rpgBindPositionBufferOfs(bs.readBytes(sd.stride * sm.numVerts), noesis.RPGEODATA_FLOAT if sd.stride==12 else noesis.RPGEODATA_HALFFLOAT, sd.stride, 0)
-					
-					#UVs
-					elif sd.type == 34: 
-						foundUVs += 1
-						rapi.rpgBindUVXBuffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4, foundUVs-1, sm.numVerts)
-						
-					#Normals/Tangents
-					elif sd.type == 31 and foundNormals != 2:
-						foundNormals += 1
-						if foundNormals == 1:
-							rapi.rpgBindNormalBufferOfs(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_BYTE, 4, 0)
-						elif foundNormals == 2:
-							rapi.rpgBindTangentBufferOfs(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_BYTE, 4, 0)
-							
-					elif sd.type == 10:
-						foundColors += 1
-						if dialogOptions.readColors  and foundColors == 1:
-							rapi.rpgBindColorBufferOfs(bs.readBytes(8 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4, 0, 4)
+					if dialogOptions.isTLOU2:
+						#this works:
+						if j == 0 and sd.stride==12:
+							rapi.rpgBindPositionBuffer(bs.readBytes(12 * sm.numVerts), noesis.RPGEODATA_FLOAT, 12)
+						elif sd.type == 1:
+							rapi.rpgBindUV1Buffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4)
+						elif sd.type == 2:
+							rapi.rpgBindNormalBuffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_BYTE, 4)
+						elif sd.type == 3:
+							rapi.rpgBindTangentBuffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_BYTE, 4)
+						elif sd.type == 11:
+							rapi.rpgBindUV2Buffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4)
 						else:
-							self.userStreams[i] = self.userStreams.get(i) or []
-							self.userStreams[i].append(NoeUserStream("Vec4Halfs_" + str(foundColors-1), bs.readBytes(8 * sm.numVerts), 8, 0))
-						
+							floatsList = []
+							for v in range(sd.numVerts):
+								for c in range(4):
+									if sd.sizes[c]:
+										floatsList.append(bs.readBits(sd.sizes[c]) * sd.qScale[c] + sd.qOffs[c])
+							floatsBuffer = struct.pack("<" + 'f'*len(floatsList), *floatsList)
+							try:
+								if sd.type == 64: 
+									rapi.rpgBindPositionBuffer(floatsBuffer, noesis.RPGEODATA_FLOAT, 12)
+								elif sd.type == 65: 
+									rapi.rpgBindUV1Buffer(floatsBuffer, noesis.RPGEODATA_FLOAT, 8)
+								elif sd.type == 75: 
+									rapi.rpgBindUV2Buffer(floatsBuffer, noesis.RPGEODATA_FLOAT, 8)
+								elif sd.type == 76: 
+									rapi.rpgBindUVXBuffer(floatsBuffer, noesis.RPGEODATA_FLOAT, 8, 2, sd.numVerts)
+							except:
+								print("Failed to bind buffer type", sd.type)
 					else:
-						print("Omitting vertex component type", sd.type, "found at", bs.tell())
+						#Positions
+						if j == 0:
+							rapi.rpgBindPositionBuffer(bs.readBytes(sd.stride * sm.numVerts), noesis.RPGEODATA_FLOAT if sd.stride==12 else noesis.RPGEODATA_HALFFLOAT, sd.stride)
+						#UVs
+						elif sd.type == 34: 
+							foundUVs += 1
+							rapi.rpgBindUVXBuffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4, foundUVs-1, sm.numVerts)
+						#Normals/Tangents
+						elif sd.type == 31 and foundNormals != 2:
+							foundNormals += 1
+							if foundNormals == 1:
+								rapi.rpgBindNormalBuffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_BYTE, 4)
+							elif foundNormals == 2:
+								rapi.rpgBindTangentBuffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_BYTE, 4)
+						#Extra vec4 halfs
+						elif sd.type == 10:
+							foundColors += 1
+							if dialogOptions.readColors  and foundColors == 1:
+								rapi.rpgBindColorBufferOfs(bs.readBytes(8 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4, 0, 4)
+							else:
+								self.userStreams[i] = self.userStreams.get(i) or []
+								self.userStreams[i].append(NoeUserStream("Vec4Halfs_" + str(foundColors-1), bs.readBytes(8 * sm.numVerts), 8, 0))
+						else:
+							print("Omitting vertex component type", sd.type, "found at", bs.tell())
 				
 				if self.boneList and sm.skinDesc:
 					bs.seek(sm.skinDesc.mapOffset)
@@ -1692,7 +2231,7 @@ class PakFile:
 					for v, offsetsCounts in enumerate(vertWeightOffsets):
 						bs.seek(sm.skinDesc.weightsOffset + offsetsCounts[1])
 						tupleList = []
-						for w in range(8):
+						for w in range(12):
 							if w >= offsetsCounts[0]:
 								weightList.append(0)
 								idsList.append(0)
@@ -1700,8 +2239,8 @@ class PakFile:
 								weightList.append(bs.readBits(22))
 								idsList.append(bs.readBits(10) + startingBonesCt)
 								
-					rapi.rpgBindBoneIndexBufferOfs(struct.pack("<" + 'H'*len(idsList), *idsList), noesis.RPGEODATA_USHORT, 16, 0, 8)
-					rapi.rpgBindBoneWeightBufferOfs(struct.pack("<" + 'I'*len(weightList), *weightList), noesis.RPGEODATA_UINT, 32, 0, 8)
+					rapi.rpgBindBoneIndexBufferOfs(struct.pack("<" + 'H'*len(idsList), *idsList), noesis.RPGEODATA_USHORT, 24, 0, 12)
+					rapi.rpgBindBoneWeightBufferOfs(struct.pack("<" + 'I'*len(weightList), *weightList), noesis.RPGEODATA_UINT, 48, 0, 12)
 				
 				try:
 					bs.seek(sm.facesOffset)
@@ -1722,13 +2261,6 @@ class PakFile:
 			print("Geometry data not found!")
 			
 		return 1
-		
-
-def pakLoadRGBA(data, texList):
-	
-	pak = PakFile(NoeBitStream(data), {'path':rapi.getInputName(), 'texList':texList})
-	pak.readPak()
-	return 1
 
 def pakLoadModel(data, mdlList):
 	
@@ -1749,14 +2281,13 @@ def pakLoadModel(data, mdlList):
 	noDialog = noesis.optWasInvoked("-nodialog") or NoDialog
 	pak = PakFile(NoeBitStream(data), {'path':rapi.getInputName()})
 	ctx = rapi.rpgCreateContext()
+	gameName = getGameName()
 	
 	if not noDialog:
-		gameName = getGameName()
 		pak.readPakHeader()
 		dialog = openOptionsDialogWindow(None, None, {"pak":pak})
 		dialog.createPakWindow()
 		pak.readPak()
-		
 	
 	if not noDialog and dialog.isCancelled:
 		mdlList.append(NoeModel())
@@ -1787,7 +2318,7 @@ def pakLoadModel(data, mdlList):
 				fullOtherPath = dialog.localDir + "\\" + otherPath
 				if rapi.getLocalFileName(fullOtherPath) != dialog.name: 
 					if not rapi.checkFileExists(fullOtherPath):
-						fullOtherPath = dialog.baseDir + dialogOptions.currentDir + "\\" + otherPath
+						fullOtherPath = dialogOptions.currentDir + "\\" + otherPath
 					if rapi.checkFileExists(fullOtherPath):
 						otherPak = PakFile(NoeBitStream(rapi.loadIntoByteArray(fullOtherPath)), {'path':fullOtherPath})
 						otherPak.texList = pak.texList
@@ -1822,6 +2353,8 @@ def pakLoadModel(data, mdlList):
 			for meshIdx, userStreamList in pak.userStreams.items():
 				if userStreamList and meshIdx < len(mdl.meshes):
 					mdl.meshes[meshIdx].setUserStreams(userStreamList)
+		#for mesh in mdl.meshes:
+		#	print (mesh.name, mesh.positions)
 		
 	return 1
 
@@ -1851,20 +2384,22 @@ def pakWriteModel(mdl, bs):
 			print("Aborting...")
 			return
 		return injectMeshName
-	
+		
 	fileName = None
 	if noesis.optWasInvoked("-meshfile"):
 		injectMeshName = noesis.optGetArg("-meshfile")
 	else:
 		injectMeshName = getExportName(fileName)
-		
+	
 	if injectMeshName == None:
 		return 0
 	while not (rapi.checkFileExists(injectMeshName)):
 		print ("File not found!")
+		if noesis.optGetArg("-meshfile"):
+			print(injectMeshName, "\n", getExportName(fileName))
 		injectMeshName = getExportName(fileName)	
 		fileName = injectMeshName
-		if injectMeshName == None:
+		if injectMeshName == None or noesis.optGetArg("-meshfile"):
 			return 0
 			
 	srcMesh = rapi.loadIntoByteArray(injectMeshName)
@@ -1985,9 +2520,9 @@ def pakWriteModel(mdl, bs):
 					LODidx = int(sm.name[lodFind+5]) if lodFind != -1 and sm.name[lodFind+5].isnumeric() else 0
 					if LODidx > lastLOD:
 						lastLOD = LODidx
-					if not dialogOptions.doLODs and LODidx > 0:
-						if len(writeMesh.positions) == 3:
-							continue
+					#if not dialogOptions.doLODs and LODidx > 0:
+					#	if len(writeMesh.positions) == 3:
+					#		continue
 					
 					print("Injecting ", writeMesh.name)
 					appendedPositions = appendedWeights = appendedIndices = isModded #False
@@ -2004,8 +2539,6 @@ def pakWriteModel(mdl, bs):
 					#finalSdBytesList = []
 					#for j, sd in enumerate(sm.streamDescs):
 					#	sdBytesList.append(bs.readBytes(24))
-					
-					#'''
 					
 					for j, sd in enumerate(sm.streamDescs):
 						bs.seek(sd.offset)
@@ -2027,8 +2560,6 @@ def pakWriteModel(mdl, bs):
 						tempbs.seek(bufferStart)
 						
 						if ((j == 0 and sd.stride == 12 or sd.stride == 8)) and not foundPositions:
-							#if appendedPositions:
-							#	newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
 							bFoundPositions = True
 							#finalSdBytesList.append(sdBytesList[j])
 							if sd.stride == 12:
@@ -2044,8 +2575,6 @@ def pakWriteModel(mdl, bs):
 									tempbs.writeHalfFloat(0)
 									
 						elif sd.type == 34:
-							#if appendedPositions:
-							#	newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
 							foundUVs += 1
 							UVs = []
 							if foundUVs == 1 and writeMesh.uvs:
@@ -2065,9 +2594,6 @@ def pakWriteModel(mdl, bs):
 									tempbs.writeHalfFloat(0)
 									
 						elif sd.type == 31 and foundNormals < 2:
-							#if appendedPositions:
-							#	newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
-
 							foundNormals += 1
 							#finalSdBytesList.append(sdBytesList[j])
 							if foundNormals == 1:
@@ -2088,9 +2614,6 @@ def pakWriteModel(mdl, bs):
 										tempbs.writeByte(127)
 						
 						elif sd.type == 10:
-							#if appendedPositions:
-							#	newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
-
 							if writeMesh.colors and not wroteColors:
 								wroteColors = True
 								#finalSdBytesList.append(sdBytesList[j])
@@ -2107,8 +2630,6 @@ def pakWriteModel(mdl, bs):
 									tempbs.writeHalfFloat(0)
 									
 						else:
-							#if appendedPositions:
-							#	newPak.changePointerFixup(sd.bufferOffsetAddr, wb.tell(), newPage)
 							print("Nulling unknown component type", sd.type)
 
 						
@@ -2194,20 +2715,21 @@ def pakWriteModel(mdl, bs):
 						bs.seek(sm.nrmRecalcDesc[3])
 						for k in range(sm.nrmRecalcDesc[4]):
 							bs.writeShort(0)'''
-						
+						nrmStart = wb.tell()
 						for n in range(4):
 							bs.seek(sm.nrmRecalcDesc[n])
 							appendedPositions = appendedPositions or (len(writeMesh.positions) > readUIntAt(bs, sm.nrmRecalcDesc[6]-8))
 							tempbs = wb if appendedPositions else bs
 							if appendedPositions: 
-								if wb.tell() + 2 * len(writeMesh.positions) > 1048032:
+								if n == 0 and wb.tell() + 2 * len(writeMesh.positions) > 1048032:
 									newPageStreams.append(wb)
 									newPage += 1
 									wb = NoeBitStream()
 									tempbs = wb
-								newPak.changePointerFixup(sm.nrmRecalcDesc[6] + 8*n, wb.tell(), newPage)
-							for k in range(len(writeMesh.positions)+1):
-								tempbs.writeShort(0)
+								newPak.changePointerFixup(sm.nrmRecalcDesc[6] + 8*n, nrmStart, newPage)
+							if not appendedPositions or n == 0:
+								for k in range(len(writeMesh.positions)):
+									tempbs.writeShort(0)
 							writeUIntAt(bs, sm.nrmRecalcDesc[6]-8, len(writeMesh.positions))
 							writeUIntAt(bs, sm.nrmRecalcDesc[6]-4, len(writeMesh.indices))
 					
@@ -2233,7 +2755,7 @@ def pakWriteModel(mdl, bs):
 				print("\nWARNING:	Duplicate mesh names detected! Check your FBX for naming or geometry issues. This pak may crash the game!\n")
 
 		#Set all LODs except the last one to read as LOD0:
-		if doWrite and not dialogOptions.doLODs:
+		if doWrite:# and not dialogOptions.doLODs:
 			f.seek(source.geoOffset[0] + source.geoOffset[1] + 44)
 			LODCount = f.readUInt()
 			f.seek(32, 1)
