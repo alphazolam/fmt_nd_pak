@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Naughty Dog ".pak" plugin for Rich Whitehouse's Noesis
 #Author: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v1.4 (February 26, 2023)'
+Version = 'v1.41 (March 20, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -34,7 +34,6 @@ import noewin
 import json
 import os
 import re
-import random
 import time
 
 class DialogOptions:
@@ -146,18 +145,14 @@ def generateDummyTexture4px(rgbaColor, name="Dummy"):
 		imageByteList.extend(rgbaColor)
 	imageData = struct.pack("<" + 'B'*len(imageByteList), *imageByteList)
 	imageData = rapi.imageDecodeRaw(imageData, 4, 4, "r8g8b8a8")
-	
 	return NoeTexture(name, 4, 4, imageData, noesis.NOESISTEX_RGBA32)	
 	
-def mergeChannelsRGBA(sourceBytes, sourceChannel, sourceWidth, sourceHeight, targetBytes, targetChannel, targetWidth, targetHeight):
+def moveChannelsRGBA(sourceBytes, sourceChannel, sourceWidth, sourceHeight, targetBytes, targetChannel, targetWidth, targetHeight):
 	resizedSourceBytes = rapi.imageResample(sourceBytes, sourceWidth, sourceHeight, targetWidth, targetHeight)
-	#resizedSourceBytes = rapi.imageEncodeRaw(resizedSourceBytes, targetWidth, targetHeight, "r8g8b8a8")
-	#resizedSourceBytes = rapi.imageDecodeRaw(resizedSourceBytes, targetWidth, targetHeight, "r8g8b8a8")
 	outputTargetBytes = copy.copy(targetBytes)
 	for i in range(int(len(resizedSourceBytes)/16)):
 		for b in range(4):
 			outputTargetBytes[i*16 + b*4 + targetChannel] = resizedSourceBytes[i*16 + b*4 + sourceChannel]
-	
 	return outputTargetBytes
 
 def encodeImageData(data, width, height, fmt):
@@ -885,6 +880,7 @@ class openOptionsDialogWindow:
 		self.path = self.pak.path or rapi.getInputName()
 		self.name = rapi.getLocalFileName(self.path)
 		self.loadItems = [self.name]
+		self.fullLoadItems = [self.path]
 		self.localDir = rapi.getDirForFilePath(self.path)
 		self.localRoot = findRootDir(self.path)
 		self.baseDir = BaseDirectories[gameName] 
@@ -899,7 +895,6 @@ class openOptionsDialogWindow:
 		self.localIdx = 0
 		self.isOpen = True
 		self.isCancelled = False
-		self.isStarted = False
 		dialogOptions.currentDir = self.localDir
 		self.currentDirTxt = dialogOptions.currentDir
 		self.clicker = DoubleClickTimer(name="", idx=0, timer=0)
@@ -946,7 +941,9 @@ class openOptionsDialogWindow:
 				self.setPakList()
 			elif self.pakList.getStringForIndex(self.pakIdx) not in self.loadItems:
 				self.loadItems.append(self.pakList.getStringForIndex(self.pakIdx))
+				self.fullLoadItems.append(dialogOptions.currentDir + self.pakList.getStringForIndex(self.pakIdx))
 				self.loadList.addString(self.pakList.getStringForIndex(self.pakIdx))
+				self.fullLoadItems = [x for _, x in sorted(zip(self.loadItems, self.fullLoadItems))]
 				self.loadItems = sorted(self.loadItems)
 		self.clicker = DoubleClickTimer(name="pakList", idx=self.pakIdx, timer=time.time())
 	
@@ -955,8 +952,11 @@ class openOptionsDialogWindow:
 		if self.clicker.name == "loadList" and self.loadIdx == self.clicker.idx and time.time() - self.clicker.timer < 0.25 and self.loadItems[self.loadIdx] != self.name:
 			self.loadList.removeString(self.loadItems[self.loadIdx])
 			del self.loadItems[self.loadIdx]
+			del self.fullLoadItems[self.loadIdx]
 			self.loadIdx = self.loadIdx if self.loadIdx < len(self.loadItems) else self.loadIdx - 1
 			self.loadList.selectString(self.loadItems[self.loadIdx])
+			self.fullLoadItems = [x for _, x in sorted(zip(self.loadItems, self.fullLoadItems))]
+			self.loadItems = sorted(self.loadItems)
 		self.clicker = DoubleClickTimer(name="loadList", idx=self.loadIdx, timer=time.time())
 	
 	def selectGameBoxItem(self, noeWnd, controlId, wParam, lParam):
@@ -1173,7 +1173,6 @@ class openOptionsDialogWindow:
 			self.setPakList()
 			self.setGameBox(self.gameBox)
 			self.setLocalBox(self.localBox)
-			self.isStarted = True
 			
 			self.noeWnd.doModal()
 			
@@ -1225,6 +1224,7 @@ class PakFile:
 		self.boneMap = None
 		self.boneDict = None
 		self.doLODs = False
+		self.needsBasePak = False
 		if args.get("doRead"):
 			self.readPak()
 		
@@ -1261,8 +1261,11 @@ class PakFile:
 			self.boneList = self.basePak.boneList
 			self.boneMap = self.basePak.boneMap
 			#self.boneNames = basePak.boneNames
+			return 1
 		else:
-			print("Failed to load base skeleton")
+			print("Failed to load base skeleton from", skelPath)
+			print(asdf + asd)
+			return 0
 	
 	def makeVramHashJson(self, jsons):
 		fileName = rapi.getLocalFileName(self.path)
@@ -1422,20 +1425,26 @@ class PakFile:
 		if gameName == "TLOU2":
 			for worldFolderName, worldDict in self.texDict.items():
 				for fileName, subDict in worldDict.items(): 
-					if rapi.checkFileExists(BaseDirectories[gameName] + "\\" + worldFolderName + "\\texturedict3\\" + fileName):
-						bigVramOffset = subDict.get(str(m_hash))
-						if bigVramOffset: 
-							bigVramDictFile = BaseDirectories[gameName] + "\\" + worldFolderName + "\\texturedict3\\" + fileName
+					bigVramOffset = subDict.get(str(m_hash))
+					if bigVramOffset: 
+						if rapi.checkFileExists(BaseDirectories[gameName] + worldFolderName + "\\texturedict3\\" + fileName):
+							bigVramDictFile = BaseDirectories[gameName] + worldFolderName + "\\texturedict3\\" + fileName
 							worldName = worldFolderName
 							break
+						else:
+							bigVramOffset = None
+							print("Texture hash was found, but Texture Dict does not exist!\n	", BaseDirectories[gameName] + worldFolderName + "\\texturedict3\\" + fileName)
 				if bigVramOffset: break
 		else:
 			for fileName, subDict in self.texDict.items():
-				if rapi.checkFileExists(BaseDirectories[gameName] + "texturedict2\\" + fileName):
-					bigVramOffset = subDict.get(str(m_hash))
-					if bigVramOffset: 
+				bigVramOffset = subDict.get(str(m_hash))
+				if bigVramOffset: 
+					if rapi.checkFileExists(BaseDirectories[gameName] + "texturedict2\\" + fileName):
 						bigVramDictFile = BaseDirectories[gameName] + "texturedict2\\" + fileName
 						break
+					else:
+						bigVramOffset = None
+						print("Texture hash was found, but Texture Dict does not exist!", texFileName, "\n	", BaseDirectories[gameName] + "texturedict2\\" + fileName)
 		
 				
 		if bigVramOffset: 
@@ -1449,7 +1458,7 @@ class PakFile:
 			print("VRAM texture hash found!", fileName, '{:02X}'.format(m_hash), texFileName) #offset + gdRawDataStarts[gameName][worldName][fileName], width, height, vramSize, imgFormat, "\n", texFileName)
 			imageData = readFileBytes(bigVramDictFile, offset + gdRawDataStarts[gameName][worldName][fileName], vramSize)
 		else:
-			print("Texture hash not found in json:", m_hash, "\n", texFileName)
+			print("Loading local texture", texFileName)
 			bs.seek(pakOffset + self.pakPageEntries[len(self.pakPageEntries)-1][0] + self.pakPageEntries[len(self.pakPageEntries)-1][1])
 			imageData = bs.readBytes(vramSize)
 			
@@ -1600,9 +1609,15 @@ class PakFile:
 					
 				if m_itemType == "GEOMETRY_1":
 					self.geoOffset = (m_resItemOffset, start)
+					m_numSubMeshDesc = readUIntAt(bs, self.geoOffset[0] + self.geoOffset[1] + 32 + 8)
+					bs.seek(self.geoOffset[0] + self.geoOffset[1] + 32 + 40)
+					SubmeshesOffs = readPointerFixup()
+					for i in range(m_numSubMeshDesc):
+						bs.seek(SubmeshesOffs + 176*i + 104)
+						self.needsBasePak = self.needsBasePak or not not bs.readUInt64()
 					
 				bs.seek(place)
-		self.readPakHeader = True
+		#self.readPakHeader = True
 	
 	def readPak(self):
 		
@@ -1616,14 +1631,15 @@ class PakFile:
 		
 		if not self.jointOffset and dialogOptions.doLoadBase and dialogOptions.baseSkeleton: # and dialogOptions.baseIdx != -1:
 			localRoot = findRootDir(rapi.getOutputName() or rapi.getInputName())
-			baseSkelPath = BaseDirectories[gameName] + dialogOptions.baseSkeleton
+			baseSkelPath = BaseDirectories[gameName] + dialogOptions.baseSkeleton if dialogOptions.baseSkeleton[1] != ":" else dialogOptions.baseSkeleton
 			if rapi.checkFileExists(localRoot + dialogOptions.baseSkeleton):
 				baseSkelPath = localRoot + dialogOptions.baseSkeleton
 				if rapi.checkFileExists(baseSkelPath.replace(".pak", ".NEW.pak")): 
 					baseSkelPath = baseSkelPath.replace(".pak", ".NEW.pak")
 				print("\nFound local base pak: ", baseSkelPath, "\n")
 			dialogOptions.baseSkeleton = ""
-			self.loadBaseSkeleton(baseSkelPath)
+			if not self.loadBaseSkeleton(baseSkelPath) and not noesis.optWasInvoked("-t"):
+				return 0
 		
 		if self.jointOffset:
 			start = self.jointOffset[1]
@@ -1733,7 +1749,7 @@ class PakFile:
 						lastBone.parentIndex = boneNames.index("headb") + startBoneIdx
 					else:	
 						lastBone.parentIndex = 0 #parent stragglers to root
-			
+						
 		if self.geoOffset:
 			start = self.geoOffset[1]
 			print("Found Geometry") # offset", self.geoOffset[0] + start)
@@ -1981,7 +1997,7 @@ class PakFile:
 					material.setDefaultBlend(0)
 					material.setSpecularColor(NoeVec4([0.5, 0.5, 0.5, 32.0])) 
 					secondaryDiffuse = []
-					loadedDiffuse = loadedNormal = loadedTrans = loadedSpec = loadedMetal = loadedRoughness = False
+					loadedDiffuse = loadedNormal = loadedTrans = loadedSpec = loadedMetal = loadedRoughness = loadedOcc = False
 					
 					for j in range(texCount):
 						bs.seek(texDescsListOffs + (40+8*dialogOptions.isTLOU2)*j )
@@ -2026,8 +2042,12 @@ class PakFile:
 								doSet = loadedSpec = vramHash
 								material.setSpecularTexture(texFileName)
 								#material.flags |= noesis.NMATFLAG_PBR_SPEC
-							elif not secondaryDiffuse and name.find("Color01") != -1:
-								secondaryDiffuse = [texFileName, vramHash]
+							elif not loadedOcc and name.find("Ao01") != -1:
+								doSet = loadedOcc = vramHash
+								material.setOcclTexture(texFileName)
+								
+						if not loadedDiffuse and not secondaryDiffuse and name.find("Color0") != -1:
+							secondaryDiffuse = [texFileName, vramHash]
 								
 						'''if dialogOptions.doConvertTex and not loadedSpec :
 							if  (name.find("LinearBlend0") != -1 or name.find("ME") != -1): #not loadedMetal and
@@ -2134,7 +2154,7 @@ class PakFile:
 							if isinstance(texNameOrList, list):
 								print("Found merge hash", texNameOrList[0], "for", tex.name)
 								channelTex = self.loadVRAM(self.vrams[texNameOrList[0]][0])
-								tex.pixelData = mergeChannelsRGBA(channelTex.pixelData, texNameOrList[1], channelTex.width, channelTex.height, tex.pixelData, texNameOrList[2], tex.width, tex.height)
+								tex.pixelData = moveChannelsRGBA(channelTex.pixelData, texNameOrList[1], channelTex.width, channelTex.height, tex.pixelData, texNameOrList[2], tex.width, tex.height)
 								
 							elif texNameOrList not in alreadyLoadedList:
 								dummyTex = self.loadVRAM(self.vrams[vramHash][0], texNameOrList)
@@ -2312,13 +2332,10 @@ def pakLoadModel(data, mdlList):
 					pak.boneMap = pak.basePak.boneMap
 					pak.boneDict = pak.basePak.boneDict
 				else:
-					print("Failed to load Skeleton")
+					print("Failed to load Skeleton", skelPath or "[No path found]")
 		else:
-			for otherPath in dialog.loadItems:
-				fullOtherPath = dialog.localDir + "\\" + otherPath
+			for fullOtherPath in dialog.fullLoadItems:
 				if rapi.getLocalFileName(fullOtherPath) != dialog.name: 
-					if not rapi.checkFileExists(fullOtherPath):
-						fullOtherPath = dialogOptions.currentDir + "\\" + otherPath
 					if rapi.checkFileExists(fullOtherPath):
 						otherPak = PakFile(NoeBitStream(rapi.loadIntoByteArray(fullOtherPath)), {'path':fullOtherPath})
 						otherPak.texList = pak.texList
@@ -2420,12 +2437,22 @@ def pakWriteModel(mdl, bs):
 	for hint, fileName in baseSkeletons[gameName].items():
 		if rapi.getOutputName().find(hint) != -1:
 			dialogOptions.baseSkeleton = fileName
+			
+	source.readPakHeader()
+	if source.needsBasePak and not rapi.checkFileExists(BaseDirectories[gameName] + (dialogOptions.baseSkeleton or "")):
+		dialogOptions.baseSkeleton = injectMeshName.replace(".pak", "-base.pak")
+		while dialogOptions.baseSkeleton != None and not rapi.checkFileExists(dialogOptions.baseSkeleton):
+			dialogOptions.baseSkeleton = noesis.userPrompt(noesis.NOEUSERVAL_FILEPATH, "Skeleton Not Found", "Input the path to the .pak containing this model's skeleton", dialogOptions.baseSkeleton, None) 
+		if not dialogOptions.baseSkeleton:
+			print("No base skeleton was found for skinned mesh, aborting...")
+			return 0
+			
 	source.readPak()
 	
 	boneDict = {}
-	if not texOnly or (noesis.optWasInvoked("-bones") and (source.basePak or newPak).jointOffset):
+	if not texOnly or (noesis.optWasInvoked("-bones") and source.basePak.jointOffset):
 		try:
-			for i, bone in enumerate(source.boneList):# or mdl.bones):
+			for i, bone in enumerate(source.boneList):
 				boneDict[bone.name] = i
 		except:
 			print("ERROR: Could not load base skeleton")
@@ -2520,9 +2547,9 @@ def pakWriteModel(mdl, bs):
 					LODidx = int(sm.name[lodFind+5]) if lodFind != -1 and sm.name[lodFind+5].isnumeric() else 0
 					if LODidx > lastLOD:
 						lastLOD = LODidx
-					#if not dialogOptions.doLODs and LODidx > 0:
-					#	if len(writeMesh.positions) == 3:
-					#		continue
+					if not dialogOptions.doLODs and LODidx > 0:
+						if len(writeMesh.positions) == 3:# and LODidx  and lodIdx < :
+							continue
 					
 					print("Injecting ", writeMesh.name)
 					appendedPositions = appendedWeights = appendedIndices = isModded #False
@@ -2653,25 +2680,37 @@ def pakWriteModel(mdl, bs):
 									fbxWeightCount += 1
 									trueWeightCounts[v] += 1
 									
-						appendedWeights = (fbxWeightCount > sm.skinDesc.weightCount) or appendedPositions #or appendedWeights
-						if appendedWeights and wb.tell() > 0 and wb.tell() + 4*fbxWeightCount + 8*len(writeMesh.positions) > 1048032:
+						if appendedPositions and wb.tell() > 0 and wb.tell() + 8*len(writeMesh.positions) > 1048032:
 							newPageStreams.append(wb)
 							newPage += 1
 							wb = NoeBitStream()
 							
 						runningOffset = boneID = 0
-						idxStart = wb.tell() if appendedWeights else sm.skinDesc.mapOffset
-						if appendedWeights:
+						idxStart = wb.tell() if appendedPositions else sm.skinDesc.mapOffset
+						idxbs = wb if appendedPositions else bs
+						
+						if appendedPositions:
 							newPak.changePointerFixup(sm.skinDesc.mapOffsetAddr, idxStart, newPage)
 							for vertWeight in writeMesh.weights:
 								wb.writeUInt64(0)
+						
+						appendedWeights = (fbxWeightCount > sm.skinDesc.weightCount)
+						if appendedWeights:
+							if 4*fbxWeightCount > 1048032:
+								print("\nWARNING: Weights buffer exceeds the maximum page size of 262008 weights (has " + str(fbxWeightCount) + ")!\n")
+							if wb.tell() > 0 and wb.tell() + 4*fbxWeightCount > 1048032:
+								newPageStreams.append(wb)
+								newPage += 1
+								wb = NoeBitStream()
 							newPak.changePointerFixup(sm.skinDesc.weightOffsetAddr, wb.tell(), newPage)
+							
 						wtStart = wb.tell() if appendedWeights else sm.skinDesc.weightsOffset
 						tempbs = wb if appendedWeights else bs
+						
 						for v, vertWeight in enumerate(writeMesh.weights):
-							tempbs.seek(idxStart + 8*v)
-							tempbs.writeUInt(trueWeightCounts[v])
-							tempbs.writeUInt(runningOffset)
+							idxbs.seek(idxStart + 8*v)
+							idxbs.writeUInt(trueWeightCounts[v])
+							idxbs.writeUInt(runningOffset)
 							tempbs.seek(wtStart + runningOffset)
 							for w, weight in enumerate(vertWeight.weights):
 								if weight > 0:
