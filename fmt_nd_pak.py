@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Naughty Dog ".pak" plugin for Rich Whitehouse's Noesis
 #Author: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v1.5 (March 30, 2023)'
+Version = 'v1.51 (March 30, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -18,7 +18,7 @@ ReadColors = False												# Read vertex colors
 PrintMaterialParams = False										# Print out all material parameters in the debug log when importing
 texoutExt = ".dds"												# Extension of texture files (change to load textures of a specific type in Blender)
 gameName = "U4"													# Default game name
-ReparentHelpers = 2												# Parents helper bones based on their names, mostly for TLOU models. Set to '2' for automatic
+ReparentHelpers = 2												# Parents helper bones based on their names, mostly for TLOU models. Set to 2 for Auto
 
 
 # Set the base path from which the plugin will search for pak files and textures:
@@ -89,13 +89,13 @@ def pakCheckType(data):
 def getGameName():
 	inName = rapi.getInputName().lower()
 	outName = rapi.getOutputName().lower()
-	if inName.find("\\thelostlegacy\\") != -1 or inName.find("tll") != -1:
+	if inName.find("\\thelostlegacy\\") != -1 or inName.find("tll") != -1 or inName.find("ost legacy") != -1:
 		return "TLL"
-	if inName.find("\\uncharted4\\") != -1 or inName.find("u4") != -1: 
+	if inName.find("\\uncharted4\\") != -1 or inName.find("u4") != -1 or inName.find("uc4") != -1 or inName.find("uc4") != -1:
 		return "U4"
-	if inName.find("\\ps4\\main\\") != -1 or inName.find("tlou2") != -1: 
+	if inName.find("\\ps4\\main\\") != -1 or inName.find("tlou2") != -1 or inName.find("part 2") != -1  or inName.find("||") != -1 or inName.find("t2") != -1: 
 		return "TLOU2"
-	if inName.find("\\pc\\main\\") != -1 or inName.find("tloup1") != -1: 
+	if inName.find("\\pc\\main\\") != -1 or inName.find("tlou") != -1 or inName.find("t1") != -1 or inName.find("last of us") != -1: 
 		return "TLOUP1"
 	return gameName
 
@@ -1524,8 +1524,9 @@ class PakFile:
 			pageId = self.getPointerFixupPage(readAddr)
 			if pageId != None:
 				return offset + self.pakPageEntries[pageId][0]
-			print("ReadAddr not found in PointerFixups!", readAddr)
-			print("ReadAddr not found in PointerFixups! This file may be broken", crashHere)
+			if not TP1ZeroCondition:
+				print("ReadAddr not found in PointerFixups!", readAddr)
+				print("ReadAddr not found in PointerFixups! This file may be broken", crashHere)
 			
 		return offset
 	
@@ -1538,8 +1539,8 @@ class PakFile:
 			#self.boneNames = basePak.boneNames
 			return 1
 		else:
-			print("Failed to load base skeleton from", skelPath)
-			print(asdf + asd)
+			print("\nERROR: Failed to load base skeleton from", skelPath, "\n")
+			#print(asdf + asd)
 			return 0
 	
 	def makeVramHashJson(self, jsons):
@@ -2386,7 +2387,6 @@ class PakFile:
 					params = {}
 					setBaseColor = setSpecScale = setRoughness = setMetal = False
 					outstring = "\n" + matKey + "material parameters:"
-					print("shaderParamsOffs", shaderParamsOffs)
 					
 					for j in range(paramCount):
 						bs.seek(shaderParamsOffs + 24*j)
