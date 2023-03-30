@@ -3,12 +3,17 @@ Naughty Dog ".pak" model plugin for Rich Whitehouse's Noesis
 
 by alphaZomega
 
+![plugin2](https://i.imgur.com/4MMqiuE.png)
 ![plugin](https://i.imgur.com/oAzAv5A.png)
 
-This plugin previews Uncharted 4, The Lost Legacy and The Last of Us Part II models from their pak files and can fetch textures for them as well.
+This plugin previews Naughty Dog pak models from their files and can fetch textures for them as well.
 It can also create modified pak files for use in modding the game.
 Support for Naughty Dog games beyond Uncharted 4 is also possible in the future.
 
+## Supported Games
+- Uncharted: Legacy of Thieves Collection
+- The Last of Us Part I *(extraction only -- injection to be added once pak modding is possible)*
+- The Last of Us Part II *(extraction and texture injection only)*
 
 ## Installation
 1. Download and install [Noesis](https://richwhitehouse.com/index.php?content=inc_projects.php&showproject=91)
@@ -21,17 +26,19 @@ Support for Naughty Dog games beyond Uncharted 4 is also possible in the future.
 
 5. (Optional) Associate Noesis with loading .pak files
 
-
 ## Extaction / File Modding
-Use [U4.PSARC.Tool](https://github.com/Ekey/U4.PSARC.Tool) by Ekey to extract your PSARC files and get the pak files that make up everything in the game.
-Rename your original PSARC so that the game does not see it and it will resort to loading its assets from your extracted folder of that PSARC instead, if it is in the same folder.
+Use [U4.PSARC.Tool](https://github.com/Ekey/U4.PSARC.Tool) by Ekey to extract your PSARC files (also works for TLOU Part I) and get the pak files that make up everything in the game.
+In Uncharted LOT, you can rename your original PSARC so that the game does not see it and it will resort to loading its assets from your extracted folder of that PSARC instead, if it is in the same folder.
 
-You can use [Fluffy Mod Manager](https://www.nexusmods.com/unchartedlegacyofthievescollection/mods/45) to install and uninstall mods quickly without needing to extract everything
+Also in Uncharted, you can use [Fluffy Mod Manager](https://www.nexusmods.com/unchartedlegacyofthievescollection/mods/45) to install and uninstall mods quickly without needing to extract everything
+
+In The Last of Us Part I and II, you will need to extract your psarcs into a central folder like this, then give the plugin the location of that folder:
+![tlou1folder](https://i.imgur.com/3FG1Fo7.png)
 
 ## Usage
 Load an Uncharted 4 pak file in Noesis and it will appear in the Noesis preview, if it has geometry.
 If you have set up your extracted base directory in Installation step 3, many models should load their hi-res textures.
-LOW RES EMBEDDED TEXTURES ARE DISPLAYED WITH BLACK LINES ACROSS THEM, this is a bug I will try to fix.
+LOW RES EMBEDDED TEXTURES ARE DISPLAYED WITH BLACK LINES ACROSS THEM, this is a bug I will try to fix eventually.
 
 You can export this model as FBX with 'File -> Export from Preview'. Then view or edit it in Blender or 3dsmax.
 Using 'Export From Preview' on a model that has had its textures loaded will save the textures to the same folder as TGA files. You can bypass this by checking 'No Textures' in the Noesis export menu.
@@ -81,7 +88,7 @@ You can create a folder named after the file you are injecting and fill it with 
 For example, when injecting "nadine-island-body.pak", create a folder called "nadine-island-body" next to it and put "nadine_mad_pants-color.dds" encoded as BC1/DXT1 compression, and it will become the texture for Nadine's pants on the island. You can use Intel Texture Works plugin for Photoshop to encode your textures.
 Even if you are not modding the mesh and only want to change textures, you still need to use an FBX to inject them.
 Check the Noesis debug log when exporting for the text "Checking for textures in \[path]" to see exactly where you need to put your dds files.
-*NORMAL MAPS should have AMBIENT OCCLUSION map in the RED channel, Normal X in the GREEN channel and Normal Y in the BLUE channel*
+*Uncharted "ao" type NORMAL MAPS should have AMBIENT OCCLUSION map in the RED channel, Normal X in the GREEN channel and Normal Y in the BLUE channel*
 
 ## Material Modding
 To edit materials, you will need to use my 010 Editor template, [nd_pak.bt ](https://github.com/alphazolam/nd_pak.bt)
@@ -105,13 +112,13 @@ It will let you select a pak file to inject, and will make a modified copy of it
 - It is always helpful for rigging to use the multi-file loading feature of the plugin to import body, head, hair, jacket, holster etc all together on the same big skeleton
 
 ## SUPPORT 
-Use my [nd_pak.bt](https://github.com/alphazolam/nd_pak.bt) binary template to learn more about pak files and edit things like material parameters
+Use my [nd_pak.bt](https://github.com/alphazolam/nd_pak.bt) binary template to learn more about pak files and edit things like material parameters.
 
+For more support, join our [Uncharted Modding discord](https://discord.gg/APQr5GgUeC) or our [TLOU Modding discord](https://discord.gg/qzwXmPaGjz)
 
-For more support, join our Uncharted Modding discord at 
+## CREDITS
+- [Icemesh](https://github.com/icemesh/)  (pak research help)
+- Chandler Threepwood (testing)
 
-https://discord.gg/APQr5GgUeC
-
-
-Here is an example mod [Chris Redfield RE8](https://www.nexusmods.com/unchartedlegacyofthievescollection/mods/47) that I made for Uncharted 4 using this plugin (click image for video):
+Here is an example mod for Uncharted 4 [Chris Redfield RE8](https://www.nexusmods.com/unchartedlegacyofthievescollection/mods/47) that I made using this plugin (click image for video):
 [![ChrisModExample](https://i.imgur.com/b4b6Y6K.jpg)](https://youtu.be/iFkjbkle4JU)

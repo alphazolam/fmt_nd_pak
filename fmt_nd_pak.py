@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Naughty Dog ".pak" plugin for Rich Whitehouse's Noesis
 #Author: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v1.41 (March 20, 2023)'
+Version = 'v1.5 (March 30, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -16,9 +16,9 @@ FlipUVs = False													# Flip UVs and flip texture images rightside-up (NOT
 LoadAllTextures = False											# Load all textures onto a model, rather than only color and normal maps
 ReadColors = False												# Read vertex colors
 PrintMaterialParams = False										# Print out all material parameters in the debug log when importing
-ReparentHelpers = False											# Parents helper bones based on their names, mostly for TLOU2 models
 texoutExt = ".dds"												# Extension of texture files (change to load textures of a specific type in Blender)
 gameName = "U4"													# Default game name
+ReparentHelpers = 2												# Parents helper bones based on their names, mostly for TLOU models. Set to '2' for automatic
 
 
 # Set the base path from which the plugin will search for pak files and textures:
@@ -26,6 +26,7 @@ BaseDirectories = {
 	"TLL": "D:\\ExtractedGameFiles\\Uncharted4_data\\build\\pc\\thelostlegacy\\",
 	"U4": "D:\\ExtractedGameFiles\\Uncharted4_data\\build\\pc\\uncharted4\\",
 	"TLOU2": "D:\\ExtractedGameFiles\\root\\build\\ps4\\main\\",
+	"TLOUP1": "H:\\ExtractedGameFiles\\TLOUP1\\build\\pc\\main\\",
 }
 
 from inc_noesis import *
@@ -54,9 +55,11 @@ class DialogOptions:
 		self.gameName = gameName
 		self.currentDir = ""
 		self.isTLOU2 = False
+		self.isTLOUP1 = False
 		self.dialog = None
 
 dialogOptions = DialogOptions()
+ResItemPaddingSz = 32
 
 def registerNoesisTypes():
 	handle = noesis.register("Naughty Dog PAK", ".pak")
@@ -77,7 +80,7 @@ def registerNoesisTypes():
 def pakCheckType(data):
 	bs = NoeBitStream(data)
 	magic = bs.readUInt()
-	if magic == 2681 and magic != 68217 and magic != 2147486329:
+	if (magic == 2681 or magic == 2685) and magic != 68217 and magic != 2147486329:
 		return 1
 	else: 
 		print("Fatal Error: Unknown file magic: " + str(hex(magic)))
@@ -92,6 +95,8 @@ def getGameName():
 		return "U4"
 	if inName.find("\\ps4\\main\\") != -1 or inName.find("tlou2") != -1: 
 		return "TLOU2"
+	if inName.find("\\pc\\main\\") != -1 or inName.find("tloup1") != -1: 
+		return "TLOUP1"
 	return gameName
 
 def findNextOf(bs, integer, is64=False):
@@ -155,25 +160,57 @@ def moveChannelsRGBA(sourceBytes, sourceChannel, sourceWidth, sourceHeight, targ
 			outputTargetBytes[i*16 + b*4 + targetChannel] = resizedSourceBytes[i*16 + b*4 + sourceChannel]
 	return outputTargetBytes
 
-def encodeImageData(data, width, height, fmt):
+def encodeImageData(data, width, height, fmtName):
 	outputData = NoeBitStream()
 	mipWidth = width
 	mipHeight = height
 	mipCount = 0
-	while mipWidth > 2 or mipHeight > 2:
-		mipData = rapi.imageResample(data, width, height, mipWidth, mipHeight)
-		try:
-			dxtData = rapi.imageEncodeDXT(mipData, 4, mipWidth, mipHeight, fmt)
-		except:
-			dxtData = rapi.imageEncodeRaw(mipData, mipWidth, mipHeight, fmt)
-		outputData.writeBytes(dxtData)
-		if mipWidth > 2: 
-			mipWidth = int(mipWidth / 2)
-		if mipHeight > 2: 
-			mipHeight = int(mipHeight / 2)
-		mipCount += 1
+	decodeFmt, encodeFmt, bpp = getDXTFormat(fmtName)
+	
+	if encodeFmt != None:
+		while mipWidth > 2 or mipHeight > 2:
+			mipData = rapi.imageResample(data, width, height, mipWidth, mipHeight)
+			try:
+				dxtData = rapi.imageEncodeDXT(mipData, bpp, mipWidth, mipHeight, encodeFmt)
+			except:
+				dxtData = rapi.imageEncodeRaw(mipData, mipWidth, mipHeight, encodeFmt)
+			outputData.writeBytes(dxtData)
+			if mipWidth > 2: 
+				mipWidth = int(mipWidth / 2)
+			if mipHeight > 2: 
+				mipHeight = int(mipHeight / 2)
+			mipCount += 1
 		
 	return outputData.getBuffer(), mipCount
+	
+def getDXTFormat(fmtName):
+	bpp = 8
+	decFmt = encFmt = None
+	if fmtName.count("Bc1"):
+		encFmt = noesis.NOE_ENCODEDXT_BC1
+		decFmt = noesis.FOURCC_DXT1
+		bpp = 4
+	elif fmtName.count("Bc3"):
+		encFmt = noesis.NOE_ENCODEDXT_BC3
+		decFmt = noesis.FOURCC_BC3
+	elif fmtName.count("Bc4"):
+		encFmt = noesis.NOE_ENCODEDXT_BC4
+		decFmt = noesis.FOURCC_BC4
+		bpp = 4
+	elif fmtName.count("Bc5"):
+		encFmt = noesis.NOE_ENCODEDXT_BC5
+		decFmt = noesis.FOURCC_BC5
+	elif fmtName.count("Bc6"): 
+		encFmt = noesis.NOE_ENCODEDXT_BC6H
+		decFmt = noesis.FOURCC_BC6H
+	elif fmtName.count("Bc7"): 
+		encFmt = noesis.NOE_ENCODEDXT_BC7
+		decFmt = noesis.FOURCC_BC7
+	elif re.search("[RGBA]\d\d?", fmtName):
+		fmtName = fmtName.split("_")[0].lower()
+		encFmt = decFmt = fmtName
+	return decFmt, encFmt, bpp
+	
 	
 def recombineNoesisMeshes(mdl):
 	
@@ -219,8 +256,8 @@ def recombineNoesisMeshes(mdl):
 		
 	return combinedMeshes
 
-fullGameNames = ["Uncharted 4", "The Lost Legacy", "The Last of Us P2"]
-gamesList = [ "U4", "TLL", "TLOU2"]
+fullGameNames = ["Uncharted 4", "The Lost Legacy", "The Last of Us P1", "The Last of Us P2"]
+gamesList = [ "U4", "TLL",  "TLOUP1", "TLOU2"]
 
 for gameName, path in BaseDirectories.items():
 	if path[(len(path)-1):] != "\\":
@@ -317,6 +354,98 @@ skelFiles = {
 		"actor77\\train-locomotive-base.pak",
 		"actor77\\vin-base.pak",
 		"actor77\\waz-base.pak",
+	],
+	"TLOUP1": [
+		"common\\actor97\\gore-male-shrunk-explosion-lower-skel.pak",
+		"common\\actor97\\gore-male-shrunk-explosion-upper-skel.pak",
+		"common\\actor97\\light-skel.pak",
+		"sp-common\\actor97\\abby-skel.pak",
+		"sp-common\\actor97\\alice-skel.pak",
+		"sp-common\\actor97\\base-female-skel.pak",
+		"sp-common\\actor97\\base-male-skel.pak",
+		"sp-common\\actor97\\bird-medium-skel.pak",
+		"sp-common\\actor97\\bloater-skel.pak",
+		"sp-common\\actor97\\buck-skel.pak",
+		"sp-common\\actor97\\cannibal-m-joel-torture-chair-skel.pak",
+		"sp-common\\actor97\\craft-backpack-ellie-skel.pak",
+		"sp-common\\actor97\\dina-skel.pak",
+		"sp-common\\actor97\\dog-skel.pak",
+		"sp-common\\actor97\\ellie-skel.pak",
+		"sp-common\\actor97\\fire-extinguisher-skel.pak",
+		"sp-common\\actor97\\giraffe-skel.pak",
+		"sp-common\\actor97\\hare-skel.pak",
+		"sp-common\\actor97\\horse-main-rein-cloth-skel.pak",
+		"sp-common\\actor97\\horse-main-skel.pak",
+		"sp-common\\actor97\\horse-main-stirrups-skel.pak",
+		"sp-common\\actor97\\horse-mane-cloth-skel.pak",
+		"sp-common\\actor97\\horse-saddle-bag-straps-cloth-skel.pak",
+		"sp-common\\actor97\\horse-saddle-strap-cloth-skel.pak",
+		"sp-common\\actor97\\horse-skel.pak",
+		"sp-common\\actor97\\horse-tail-cloth-skel.pak",
+		"sp-common\\actor97\\infected-skel.pak",
+		"sp-common\\actor97\\jerry-skel.pak",
+		"sp-common\\actor97\\joel-skel.pak",
+		"sp-common\\actor97\\npc-normal-skel.pak",
+		"sp-common\\actor97\\prop-backpack-ellie-skel.pak",
+		"sp-common\\actor97\\prop-backpack-joel-skel.pak",
+		"sp-common\\actor97\\runner-f-qz-mal-outro-skel.pak",
+		"sp-common\\actor97\\t1x-bill-skel.pak",
+		"sp-common\\actor97\\t1x-david-skel.pak",
+		"sp-common\\actor97\\t1x-door-l-skel.pak",
+		"sp-common\\actor97\\t1x-door-r-skel.pak",
+		"sp-common\\actor97\\t1x-drawer-skel.pak",
+		"sp-common\\actor97\\t1x-ellie-05-skel.pak",
+		"sp-common\\actor97\\t1x-ellie-skel.pak",
+		"sp-common\\actor97\\t1x-henry-skel.pak",
+		"sp-common\\actor97\\t1x-hunter-m-striker-skel.pak",
+		"sp-common\\actor97\\t1x-james-skel.pak",
+		"sp-common\\actor97\\t1x-joel-skel.pak",
+		"sp-common\\actor97\\t1x-locker-doubledoor-skel.pak",
+		"sp-common\\actor97\\t1x-maria-skel.pak",
+		"sp-common\\actor97\\t1x-marlene-skel.pak",
+		"sp-common\\actor97\\t1x-monkey-skel.pak",
+		"sp-common\\actor97\\t1x-riley-skel.pak",
+		"sp-common\\actor97\\t1x-robert-skel.pak",
+		"sp-common\\actor97\\t1x-sam-skel.pak",
+		"sp-common\\actor97\\t1x-sarah-skel.pak",
+		"sp-common\\actor97\\t1x-tess-skel.pak",
+		"sp-common\\actor97\\t1x-tommy-skel.pak",
+		"sp-common\\actor97\\texan-f-news-reporter-skel.pak",
+		"sp-common\\pak68\\part-actor-bloater-skel.pak",
+		"sp-common\\pak68\\part-actor-fire-extinguisher-skel.pak",
+		"world-bills\\actor97\\base-brute-male-skel.pak",
+		"world-bills\\actor97\\city-bus-skel.pak",
+		"world-bills\\actor97\\infected-bloater-skel.pak",
+		"world-bills\\actor97\\infected-fem-skel.pak",
+		"world-bills\\actor97\\manny-skel.pak",
+		"world-bills\\actor97\\t1x-door-r-skel-realskel.pak",
+		"world-bills\\actor97\\t1x-heavy-truck-crewcab-pickup-fma-skel.pak",
+		"world-bills\\actor97\\t1x-hunter-ellie-drag-skel.pak",
+		"world-bills\\actor97\\t1x-hunter-joel-drag-skel.pak",
+		"world-home\\actor97\\base-female-crowd-skel.pak",
+		"world-home\\actor97\\base-female-horde-skel.pak",
+		"world-home\\actor97\\base-kid-skel.pak",
+		"world-home\\actor97\\base-male-crowd-skel.pak",
+		"world-home\\actor97\\base-male-horde-skel.pak",
+		"world-home\\actor97\\base-teen-skel.pak",
+		"world-hunter-city\\actor97\\bird-small-skel.pak",
+		"world-hunter-city\\actor97\\fish-large-skel.pak",
+		"world-hunter-city\\actor97\\ladder-skel-3o5m-realskel.pak",
+		"world-hunter-city\\actor97\\t1x-hunter-m-ellie-drag-skel.pak",
+		"world-hunter-city\\actor97\\t1x-hunter-m-joel-drag-skel.pak",
+		"world-hunter-city\\actor97\\t1x-ladder-skel-3o5m-realskel.pak",
+		"world-hunter-city\\actor97\\t1x-plank-skel-realskel.pak",
+		"world-hunter-city\\actor97\\t1x-plank-skel.pak",
+		"world-lakeside\\actor97\\t1x-cannibal-m-joel-torture-ground-skel.pak",
+		"world-mall\\actor97\\clicker-m-pharmacist-skel.pak",
+		"world-mall\\actor97\\t1x-mal-storage-swing-door-skel.pak",
+		"world-mall\\actor97\\t1x-mask-skel.pak",
+		"world-military-city\\actor97\\bird-large-skel.pak",
+		"world-military-city\\actor97\\carry-plank-skel.pak",
+		"world-military-city\\actor97\\t1x-door-l-skel-realskel.pak",
+		"world-outskirts\\actor97\\bird-xlarge-skel.pak",
+		"world-suburbs\\actor97\\seth-skel.pak",
+		"world-tommys-dam\\actor97\\door-skel.pak",
 	],
 	"TLOU2": [
 		"common\\actor97\\base-male-skel.pak",
@@ -503,6 +632,56 @@ baseSkeletons = {
 		"throw": "actor77\\throwable-base.pak",
 		"vin": "actor77\\vin-base.pak",
 		"waz": "actor77\\waz-base.pak",
+	},
+	"TLOUP1": {
+		"abby": "sp-common\\actor97\\abby-skel.pak",
+		"alice": "sp-common\\actor97\\alice-skel.pak",
+		"base-female": "sp-common\\actor97\\base-female-skel.pak",
+		"base-male": "sp-common\\actor97\\base-male-skel.pak",
+		"bill": "sp-common\\actor97\\t1x-bill-skel.pak",
+		"bird": "sp-common\\actor97\\bird-medium-skel.pak",
+		"bloater": "sp-common\\actor97\\bloater-skel.pak",
+		"brute-male": "world-bills\\actor97\\base-brute-male-skel.pak",
+		"buck": "sp-common\\actor97\\buck-skel.pak",
+		"clicker": "world-mall\\actor97\\clicker-m-pharmacist-skel.pak",
+		"david": "sp-common\\actor97\\t1x-david-skel.pak",
+		"david": "sp-common\\actor97\\t1x-david-skel.pak",
+		"dina": "sp-common\\actor97\\dina-skel.pak",
+		"dog": "sp-common\\actor97\\dog-skel.pak",
+		"ellie": "sp-common\\actor97\\t1x-ellie-skel.pak",
+		"extinguisher": "sp-common\\actor97\\fire-extinguisher-skel.pak",
+		"female-crowd": "world-home\\actor97\\base-female-crowd-skel.pak",
+		"female-horde": "world-home\\actor97\\base-female-horde-skel.pak",
+		"giraffe": "sp-common\\actor97\\giraffe-skel.pak",
+		"hare": "sp-common\\actor97\\hare-skel.pak",
+		"henry": "sp-common\\actor97\\t1x-henry-skel.pak",
+		"hunter": "sp-common\\actor97\\t1x-hunter-m-striker-skel.pak",
+		"horse": "sp-common\\actor97\\horse-main-skel.pak",
+		"infect": "sp-common\\actor97\\infected-skel.pak",
+		"infected-fem": "world-bills\\actor97\\infected-fem-skel.pak",
+		"james": "sp-common\\actor97\\t1x-james-skel.pak",
+		"jerry": "sp-common\\actor97\\jerry-skel.pak",
+		"joel": "sp-common\\actor97\\t1x-joel-skel.pak",
+		"male-crowd": "world-home\\actor97\\base-male-crowd-skel.pak",
+		"male-horde": "world-home\\actor97\\base-male-horde-skel.pak",
+		"manny": "world-bills\\actor97\\manny-skel.pak",
+		"maria": "sp-common\\actor97\\t1x-maria-skel.pak",
+		"marlene": "sp-common\\actor97\\t1x-marlene-skel.pak",
+		"mask": "world-mall\\actor97\\t1x-mask-skel.pak",
+		"monkey": "sp-common\\actor97\\t1x-monkey-skel.pak",
+		"npc": "sp-common\\actor97\\npc-normal-skel.pak",
+		"reporter": "sp-common\\actor97\\texan-f-news-reporter-skel.pak",
+		"riley": "sp-common\\actor97\\t1x-riley-skel.pak",
+		"robert": "sp-common\\actor97\\t1x-robert-skel.pak",
+		"sam": "sp-common\\actor97\\t1x-sam-skel.pak",
+		"sarah": "sp-common\\actor97\\t1x-sarah-skel.pak",
+		"seth": "world-suburbs\\actor97\\seth-skel.pak",
+		"teen": "world-home\\actor97\\base-teen-skel.pak",
+		"tess": "sp-common\\actor97\\t1x-tess-skel.pak",
+		"tommy": "sp-common\\actor97\\t1x-tommy-skel.pak",
+		#"bloater": "world-bills\\actor97\\infected-bloater-skel.pak",
+		#"ellie": "sp-common\\actor97\\t1x-ellie-05-skel.pak",
+		#"joel": "sp-common\\actor97\\joel-skel.pak",
 	},
 	"TLOU2": {
 		"abby": "world-patrol-jackson\\actor97\\abby-skel.pak",
@@ -758,6 +937,72 @@ gdRawDataStarts = {
 			"global-dict-12.pak": 79440,
 		},
 	},
+	"TLOUP1": {
+		"common": {
+			"common-dict.pak": 490768,
+		},
+		"sp-common": {
+			"sp-common-dict-1.pak": 1308752,
+			"sp-common-dict-2.pak": 1312512,
+			"sp-common-dict-3.pak": 1179152,
+			"sp-common-dict.pak": 1568992,
+		},
+		"world-bills": {
+			"world-bills-dict-1.pak": 707792,
+			"world-bills-dict.pak": 1335136,
+		},
+		"world-game-start": {
+			"world-game-start-dict.pak": 41680,
+		},
+		"world-home": {
+			"world-home-dict-1.pak": 1099808,
+			"world-home-dict-2.pak": 248576,
+			"world-home-dict.pak": 1250192,
+		},
+		"world-hunter-city": {
+			"world-hunter-city-dict-1.pak": 1020592,
+			"world-hunter-city-dict-2.pak": 316576,
+			"world-hunter-city-dict-3.pak": 1371984,
+			"world-hunter-city-dict-4.pak": 17552,
+			"world-hunter-city-dict.pak": 1406560,
+		},
+		"world-lab": {
+			"world-lab-dict.pak": 329248,
+		},
+		"world-lakeside": {
+			"world-lakeside-dict-1.pak": 481088,
+			"world-lakeside-dict.pak": 1212656,
+		},
+		"world-mall": {
+			"world-mall-dict-1.pak": 1084928,
+			"world-mall-dict-2.pak": 209008,
+			"world-mall-dict.pak": 1378112,
+		},
+		"world-military-city": {
+			"world-military-city-dict-1.pak": 1205728,
+			"world-military-city-dict-2.pak": 634832,
+			"world-military-city-dict.pak": 1291008,
+		},
+		"world-outskirts": {
+			"world-outskirts-dict-1.pak": 686208,
+			"world-outskirts-dict-2.pak": 689200,
+			"world-outskirts-dict.pak": 1352992,
+		},
+		"world-suburbs": {
+			"world-suburbs-dict-1.pak": 229472,
+			"world-suburbs-dict.pak": 1078272,
+		},
+		"world-tommys-dam": {
+			"world-tommys-dam-dict-1.pak": 422544,
+			"world-tommys-dam-dict.pak": 810576,
+		},
+		"world-university": {
+			"world-university-dict.pak": 301072,
+		},
+		"world-wild": {
+			"world-wild-dict.pak": 440240,
+		},
+	},
 	"TLOU2": {
 		"common": {
 			"common-dict.pak": 617216,
@@ -994,6 +1239,8 @@ class openOptionsDialogWindow:
 		for hint, fileName in baseSkeletons[gameName].items():
 			if self.name.find(hint) != -1 and len(hint) > len(lastFoundHint):
 				lastFoundHint = hint
+				#print(fileName)
+				#print(baseSkeletons[gameName])
 				self.baseList.selectString(fileName)
 				self.baseIdx = self.baseList.getSelectionIndex()
 				dialogOptions.baseSkeleton = fileName
@@ -1144,6 +1391,8 @@ class openOptionsDialogWindow:
 				self.loadBaseCheckbox = self.noeWnd.getControlByIndex(index)
 				self.loadBaseCheckbox.setChecked(dialogOptions.doLoadBase)
 				
+				if ReparentHelpers == 2:
+					dialogOptions.reparentHelpers = (dialogOptions.isTLOU2 or dialogOptions.isTLOUP1)
 				index = self.noeWnd.createCheckBox("Reparent Helpers", 10, 750, 130, 20, self.checkReparentCheckbox)
 				self.reparentCheckbox = self.noeWnd.getControlByIndex(index)
 				self.reparentCheckbox.setChecked(dialogOptions.reparentHelpers)
@@ -1176,6 +1425,28 @@ class openOptionsDialogWindow:
 			
 			self.noeWnd.doModal()
 			
+TP1_pakStringIDs = {
+	0x50CAF5257D6A140B: "JOINT_HIERARCHY",
+	0x349D779A792F45C1: "GEOMETRY_1",
+	0xCE3ADE693131B309: "VRAM_DESC",
+	0xE7254422A7A8F476: "VRAM_DESC_TABLE",
+	0xA2481DA1A5D2CE2B: "TEXTURE_TABLE",
+	0x36125D3CFB7F3991: "TEXTURE_DICTIONARY",
+	0x4903731234F1BEA6: "PAK_LOGIN_TABLE",
+	0x61DE7E6141BC6F2B: "EFFECT_TABLE",
+	0x460F497540A29F73: "SPAWNER_GROUP",
+	0x596A72779C4C87D: "TAG_INT",
+	0x53DE1E1977F9CBA4: "ANIM_GROUP",
+	0x791137002DB17EBB: "MATERIAL_TABLE_1",
+	0x384ADF724B123839: "FOREGROUND_SECTION_2",
+	0x5ADB4A2D2E2A6EB: "COLLISION_DATA_CLOTH",
+	0x3A3BB43D817C93DE: "TAG_VEC4",
+	0x35EB8812D3A2D576: "TAG_FLOAT",
+	0x6A98005088A56C5: "LEVEL_BOUNDING_BOX_DATA",
+	0x438E1B0DBFFAA93: "AMBSHADOWS_OCCLUDER_INFO",
+	0x7D9BFD5CEC879080: "COLLISION_DATA_FOREGROUND",
+	0xEC3AFEDF7EF282F0: "SOUND_BANK_TABLE",
+}
 
 LODSubmeshDesc = namedtuple("LODSubmeshDesc", "name address offset index")
 
@@ -1185,9 +1456,11 @@ StreamDesc = namedtuple("StreamDesc", "type offset stride bufferOffsetAddr")
 
 T2StreamDesc = namedtuple("T2StreamDesc", "type offset stride bufferOffsetAddr sizes qScale qOffs numVerts")
 
-SkinDesc = namedtuple("SkinDesc", "mapOffset weightsOffset weightCount mapOffsetAddr weightOffsetAddr")
+SkinDesc = namedtuple("SkinDesc", "mapOffset weightsOffset weightCount mapOffsetAddr weightOffsetAddr uncompressed")
 
 PakEntry = namedtuple("PakEntry", "type offset")
+
+PakLoginTableEntry = namedtuple("PakLoginTableEntry", "page offset")
 
 class PakSubmesh:
 	def __init__(self, name=None, numVerts=None, numIndices=None, facesOffset=None, streamDescs=None, skinDesc=None, nrmRecalcDesc=None, streamsAddr=None, facesOffsetAddr=None):
@@ -1215,6 +1488,7 @@ class PakFile:
 		self.matNames = args.get("matNames") or []
 		self.vramHashes = args.get("vramHashes") or []
 		self.userStreams = args.get("userStreams") or {}
+		self.pakLoginTable = []
 		self.lods = args.get("lods") or []
 		self.jointsInfo = None
 		self.jointOffset = None
@@ -1242,16 +1516,17 @@ class PakFile:
 			self.bs.writeUShort(newPage)
 			self.bs.seek(returnAddr)
 		
-	def readPointerFixup(self, bs=None):
-		bs = bs or self.bs
+	def readPointerFixup(self, TP1ZeroCondition=False):
+		bs = self.bs
 		readAddr = bs.tell()
 		offset = bs.readInt64()
-		if offset > 0:
+		if offset > 0 or TP1ZeroCondition:
 			pageId = self.getPointerFixupPage(readAddr)
 			if pageId != None:
 				return offset + self.pakPageEntries[pageId][0]
 			print("ReadAddr not found in PointerFixups!", readAddr)
 			print("ReadAddr not found in PointerFixups! This file may be broken", crashHere)
+			
 		return offset
 	
 	def loadBaseSkeleton(self, skelPath):
@@ -1280,8 +1555,8 @@ class PakFile:
 		except:
 			jsons = {}
 		jsons[gameName] = jsons.get(gameName) or {}
-		if gameName == "TLOU2":
-			gameDir = BaseDirectories["TLOU2"]
+		if gameName == "TLOU2" or gameName == "TLOUP1":
+			gameDir = BaseDirectories[gameName]
 			for folderName in os.listdir(gameDir+"\\"):
 				if os.path.isdir(os.path.join(gameDir, folderName)) and os.path.isdir(os.path.join(gameDir, folderName + "\\texturedict3")):
 					root = os.path.join(gameDir, folderName + "\\texturedict3\\")
@@ -1289,6 +1564,7 @@ class PakFile:
 					suboutput = ""
 					for fileName in os.listdir(root):
 						if fileName.find("-dict")  != -1 and fileName not in jsons[gameName][folderName]:
+							print("Found file", root + fileName)
 							dictPak = PakFile(NoeBitStream(rapi.loadIntoByteArray(root + fileName)), {"path": root + fileName})
 							pageCt = readUIntAt(dictPak.bs, 16)
 							dictPak.bs.seek(readUIntAt(dictPak.bs, 20)+12*(pageCt-1))
@@ -1296,10 +1572,11 @@ class PakFile:
 							gdRawDataStarts[gameName][folderName] = gdRawDataStarts[gameName].get(folderName) or {}
 							gdRawDataStarts[gameName][folderName][fileName] = rawDataAddr
 							suboutput += "\n    \"" + fileName + "\": " + str(rawDataAddr) + "," 
-							dictPak.readPak()
+							dictPak.readPakHeader()
 							dictPak.makeVramHashJson(jsons[gameName][folderName])
 							with open(noesis.getPluginsPath() + "python\\NDTextureHashes.json", "w") as outfile:
 								json.dump(jsons, outfile)
+					
 					output += "\n\"" + folderName + "\": {" + suboutput + "\n},"
 			print("\nGlobal dict start offsets:\n", output)
 		else:
@@ -1313,7 +1590,7 @@ class PakFile:
 					rawDataAddr = dictPak.bs.readUInt() + dictPak.bs.readUInt()
 					gdRawDataStarts[gameName][fileName] = rawDataAddr
 					output = output + "\n\"" + fileName, ": " + str(rawDataAddr) + "," 
-					dictPak.readPak()
+					dictPak.readPakHeader()
 					dictPak.makeVramHashJson(jsons)
 					with open(noesis.getPluginsPath() + "python\\NDTextureHashes.json", "w") as outfile:
 						json.dump(jsons, outfile)
@@ -1331,24 +1608,37 @@ class PakFile:
 			rawDataStart = self.pakPageEntries[len(self.pakPageEntries)-1][0] + self.pakPageEntries[len(self.pakPageEntries)-1][1]
 			newDataOffset = offset + rawDataStart
 			
-			#fetch dds data
 			ds = NoeBitStream(rapi.loadIntoByteArray(filepath))
-			magic = ds.readUInt()
-			hdrSize = ds.readUInt()
-			flags = ds.readUInt()
-			height = ds.readUInt()
-			width = ds.readUInt()
-			pitchOrLinearSize = ds.readUInt()
-			depth = ds.readUInt()
-			numMips = ds.readUInt()
-			isDX10 = (readUIntAt(ds, 84) == 808540228)
-			ds.seek(hdrSize+4)
-			if isDX10:
-				compressionType = ds.readUInt() 
-				#compressionType = dxFormat.get(compressionType)
-				ds.seek(16, 1) #skip DX10 header
+			if filepath.count(".tga"):
+				#fetch tga data
+				ds.seek(12)
+				width = ds.readUShort()
+				height = ds.readUShort()
+				depth = ds.readUByte()
+				ds.seek(18)
+				imgBytes = ds.readBytes(ds.getSize() - 18)
+				imgBytes, numMips = encodeImageData(imgBytes, width, height, fmtName)
+			elif filepath.count(".dds"):
+				#fetch dds data
+				magic = ds.readUInt()
+				hdrSize = ds.readUInt()
+				flags = ds.readUInt()
+				height = ds.readUInt()
+				width = ds.readUInt()
+				pitchOrLinearSize = ds.readUInt()
+				depth = ds.readUInt()
+				numMips = ds.readUInt()
+				isDX10 = (readUIntAt(ds, 84) == 808540228)
+				ds.seek(hdrSize+4)
+				if isDX10:
+					compressionType = ds.readUInt() 
+					ds.seek(16, 1) #skip DX10 header
+				imgBytes = ds.readBytes(ds.getSize() - ds.tell())
 				
-			imgBytes = ds.readBytes(ds.getSize() - ds.tell())
+			if dialogOptions.isTLOU2:
+				imgBytes = rapi.callExtensionMethod("tile_1dthin", imgBytes, width, height, 4 if (fmtName.count("Bc1") or fmtName.count("Bc4")) else 8, 1)
+				if noesis.optWasInvoked("-t"):
+					numMips = 1
 			
 			if True: #len(imgBytes) > vramSize: #NEEDS FIXING
 				newDataOffset = bs.getSize()
@@ -1422,7 +1712,7 @@ class PakFile:
 		bigVramDictFile = ""
 		worldName = "All"
 		
-		if gameName == "TLOU2":
+		if gameName == "TLOU2" or gameName == "TLOUP1":
 			for worldFolderName, worldDict in self.texDict.items():
 				for fileName, subDict in worldDict.items(): 
 					bigVramOffset = subDict.get(str(m_hash))
@@ -1446,7 +1736,6 @@ class PakFile:
 						bigVramOffset = None
 						print("Texture hash was found, but Texture Dict does not exist!", texFileName, "\n	", BaseDirectories[gameName] + "texturedict2\\" + fileName)
 		
-				
 		if bigVramOffset: 
 			vramBytes = readFileBytes(bigVramDictFile, bigVramOffset, 1024)
 			vramStream = NoeBitStream(vramBytes)
@@ -1463,55 +1752,66 @@ class PakFile:
 			imageData = bs.readBytes(vramSize)
 			
 		fmtName = dxFormat.get(imgFormat) or ""
-		bpp = 4 if (fmtName.find("Bc1") != -1 or fmtName.find("Bc4") != -1) else 8
+		bpp = 4 if (fmtName.count("Bc1") or fmtName.count("Bc4")) else 8
 		
 		if dialogOptions.isTLOU2:
 			imageData = rapi.callExtensionMethod("untile_1dthin", imageData, width, height, bpp, 1)
 		
-		if fmtName.find("Bc1") != -1:
-			texData = rapi.imageDecodeDXT(imageData, width, height, noesis.FOURCC_DXT1)
-			bpp = 4
-		elif fmtName.find("Bc3") != -1:
-			texData = rapi.imageDecodeDXT(imageData, width, height, noesis.FOURCC_BC3)
-		elif fmtName.find("Bc4") != -1:
-			texData = rapi.imageDecodeDXT(imageData, width, height, noesis.FOURCC_BC4)
-			bpp = 4
-		elif fmtName.find("Bc5") != -1:
-			texData = rapi.imageDecodeDXT(imageData, width, height, noesis.FOURCC_BC5)
-		elif fmtName.find("Bc6") != -1: 
-			texData = rapi.imageDecodeDXT(imageData, width, height, noesis.FOURCC_BC6H)
-		elif fmtName.find("Bc7") != -1: 
-			texData = rapi.imageDecodeDXT(imageData, width, height, noesis.FOURCC_BC7)
-			if dialogOptions.doConvertTex: 
-				if exTexName.find("_NoesisAO") != -1:
+		decodeFmt, encodeFmt, bpp = getDXTFormat(fmtName)
+		
+		if isinstance(decodeFmt, str):
+			print("RGBA: ", fmtName)
+			try:
+				texData = rapi.imageDecodeRaw(imageData, width, height, decodeFmt)
+			except:
+				print("Failed to decode raw image type", fmtName)
+		elif decodeFmt != None:
+			texData = rapi.imageDecodeDXT(imageData, width, height, decodeFmt)
+			if dialogOptions.doConvertTex and decodeFmt == noesis.FOURCC_BC7: 
+				if exTexName.count("_NoesisAO"):
 					texData = rapi.imageEncodeRaw(texData, width, height, "r8r8r8")
 					texData = rapi.imageDecodeRaw(texData, width, height, "r8g8b8")
 					texFileName = exTexName
-				elif texFileName.find("-ao") != -1 or texFileName.find("-occlusion") != -1:
+				elif texFileName.count("-ao") or texFileName.count("-occlusion"):
 					texData = rapi.imageEncodeRaw(texData, width, height, "g16b16")
 					texData = rapi.imageDecodeRaw(texData, width, height, "r16g16")
-		elif re.search("[RGBA]\d\d?", fmtName):
-			fmtName = fmtName.split("_")[0].lower()
-			print("RGBA: ", fmtName)
-			try:
-				texData = rapi.imageDecodeRaw(imageData, width, height, fmtName)
-			except:
-				print("Failed to decode raw image type", fmtName)
 		else:
 			print("Error: Unsupported texture type: " + str(imgFormat) + "  " + fmtName)
-			return []
-			
-		#if dialogOptions.isTLOU2:
-		#	texData = rapi.imageFromMortonOrder(texData, width, height)
 			
 		return NoeTexture(texFileName, width, height, texData, noesis.NOESISTEX_RGBA32)
+	
+	def checkResItem(self, start, m_resItemOffset, m_itemType):
+		bs = self.bs
+		self.entriesList.append(PakEntry(type=m_itemType, offset = m_resItemOffset))
+		
+		if m_itemType == "VRAM_DESC":
+			bs.seek(m_resItemOffset + start + 56)
+			texHash = bs.readUInt64()
+			texPath = readStringAt(bs, m_resItemOffset + start + 112)
+			splitted = rapi.getLocalFileName(texPath.replace(".tga/", "+")).split("+", 1)
+			texName = splitted[0] + texoutExt
+			if len(splitted) > 1:
+				if texName in self.vramNames:
+					texName = (splitted[0] + "_" + splitted[1]).replace(".ndb", texoutExt) #add hash to duplicate texture names
+				self.vramNames[texName] = True
+				self.vrams[texHash] = [m_resItemOffset + start, texName, [], None]
+		
+		if m_itemType == "JOINT_HIERARCHY":
+			self.jointOffset = (m_resItemOffset, start)
 			
-		print("Failed to locate texture dict", path)
-		return []
+		if m_itemType == "GEOMETRY_1":
+			self.geoOffset = (m_resItemOffset, start)
+			m_numSubMeshDesc = readUIntAt(bs, self.geoOffset[0] + self.geoOffset[1] + ResItemPaddingSz + 8)
+			bs.seek(self.geoOffset[0] + self.geoOffset[1] + ResItemPaddingSz + 40)
+			#print(bs.tell(), ResItemPaddingSz)
+			SubmeshesOffs = self.readPointerFixup()
+			for i in range(m_numSubMeshDesc):
+				bs.seek(SubmeshesOffs + 176*i + 104)
+				self.needsBasePak = self.needsBasePak or not not bs.readUInt64()
 	
 	def readPakHeader(self):
 	
-		global dialogOptions
+		global dialogOptions, ResItemPaddingSz
 		
 		print ("Reading", self.path or rapi.getInputName())
 		readPointerFixup = self.readPointerFixup
@@ -1519,10 +1819,11 @@ class PakFile:
 		bs = self.bs
 		bs.seek(0)
 		m_magic = bs.readUInt()						#0x0 0x00000A79
-		if m_magic != 2681 and m_magic != 68217 and m_magic != 2147486329:
+		if m_magic != 2681 and m_magic != 68217 and m_magic != 2147486329 and m_magic != 2685 and m_magic != 68221:
 			print("No pak header detected!", m_magic)
 			return 0
-
+		dialogOptions.isTLOUP1 = (m_magic == 2685 or m_magic == 68221)
+		
 		m_hdrSize = bs.readUInt()					#0x4 header size
 		m_pakLoginTableIdx = bs.readUInt()			#0x8 idx of the page storing the PakLoginTable
 		m_pakLoginTableOffset = bs.readUInt()		#0xC relative offset PakLoginTable = PakPageHeader + m_pakLoginTableOffset; //its a ResItem
@@ -1533,7 +1834,12 @@ class PakFile:
 		m_unk5 = bs.readUInt()						#0x20 no idea
 		m_unk6 = bs.readUInt()						#0x20 no idea
 		m_unk7 = bs.readUInt()						#0x20 no idea
-		
+		if dialogOptions.isTLOUP1:
+			m_unk8 = bs.readUInt()
+			m_unk9 = bs.readUInt()
+			m_unk10 = bs.readUInt()
+			
+		bs.seek(m_pPakPageEntryTable)
 		self.pakPageEntries = []
 		for i in range(m_pageCt):
 			self.pakPageEntries.append((bs.readUInt(), bs.readUInt(), bs.readUInt()))
@@ -1563,61 +1869,57 @@ class PakFile:
 		for name in gamesList:
 			dialogOptions.texDicts[name] = dialogOptions.texDicts.get(name) or {}
 		self.texDict = dialogOptions.texDicts[gameName]
+
+		self.pakLoginTable = []
+		self.vramNames = {}
 		
-		dialogOptions.isTLOU2 = False
+		pakLoginTableItemStart = self.pakPageEntries[m_pakLoginTableIdx][0] + m_pakLoginTableOffset
+		dialogOptions.isTLOU2 = (readUIntAt(bs, pakLoginTableItemStart+32) == 74565)
+		ResItemPaddingSz = 48 if (dialogOptions.isTLOU2 or dialogOptions.isTLOUP1) else 32
+		bs.seek(pakLoginTableItemStart + ResItemPaddingSz)
+		loginCount = bs.readUInt()
+		bs.seek(4, 1)
 		
-		for p, pageEntry in enumerate(self.pakPageEntries):
-			
-			start = pageEntry[0]
-			bs = self.bs
-			bs.seek(start + 12)
-			m_pageSize = bs.readUInt()
-			bs.seek(2,1)
-			m_numPageHeaderEntries = bs.readUShort()
-			vramNames = {}
-			
-			for ph in range(m_numPageHeaderEntries):
-				m_name = readStringAt(bs, bs.readUInt64()+start)
-				m_resItemOffset = bs.readUInt()
-				place = bs.tell() + 4
-				bs.seek(m_resItemOffset + start)
-				m_itemNameOffset = bs.readUInt64()
-				m_itemName = readStringAt(bs, m_itemNameOffset+start)
-				m_itemTypeOffset = bs.readUInt64()
-				m_itemType = readStringAt(bs, m_itemTypeOffset+start)
+		for i in range(loginCount):
+			self.pakLoginTable.append(PakLoginTableEntry(page=bs.readUInt(), offset=bs.readUInt()))
+		
+		if dialogOptions.isTLOUP1: #the outer pak format was changed a lot for TLOU Part I. ResPage and ResPageEntry are gone, now all ResItems are accessed from the pak login table and have StringIDs for names
+			for loginResItem in self.pakLoginTable:
+				start = self.pakPageEntries[loginResItem.page][0]
+				bs.seek(start + loginResItem.offset + 32)
+				typeStringID = bs.readUInt64()
+				m_itemType = TP1_pakStringIDs.get(typeStringID)
+				if m_itemType:
+					self.checkResItem(start, loginResItem.offset, m_itemType)
+					if m_itemType == "TEXTURE_TABLE" or m_itemType == "TEXTURE_DICTIONARY":
+						numTex = readUIntAt(bs, start + loginResItem.offset + ResItemPaddingSz)
+						bs.seek(start + loginResItem.offset + ResItemPaddingSz + 24)
+						listStart = readPointerFixup()
+						for i in range(numTex):
+							bs.seek(listStart+i*8)
+							pageID = self.getPointerFixupPage(bs.tell())
+							pointer = bs.readUInt64()
+							self.checkResItem(self.pakPageEntries[pageID][0], pointer-32, "VRAM_DESC")
+		else:
+			for p, pageEntry in enumerate(self.pakPageEntries):
+				start = pageEntry[0]
+				bs.seek(start + 12)
+				m_pageSize = bs.readUInt()
+				bs.seek(2,1)
+				m_numPageHeaderEntries = bs.readUShort()
 				
-				dialogOptions.isTLOU2 = dialogOptions.isTLOU2 or (readUIntAt(bs, bs.tell()+16)==74565)
-				if dialogOptions.isTLOU2:
-					m_resItemOffset += 16
+				for ph in range(m_numPageHeaderEntries):
+					m_name = readStringAt(bs, bs.readUInt64()+start)
+					m_resItemOffset = bs.readUInt()
+					place = bs.tell() + 4
+					bs.seek(m_resItemOffset + start)
+					m_itemNameOffset = bs.readUInt64()
+					m_itemName = readStringAt(bs, m_itemNameOffset+start)
+					m_itemTypeOffset = bs.readUInt64()
+					m_itemType = readStringAt(bs, m_itemTypeOffset+start)
 					
-				self.entriesList.append(PakEntry(type=m_itemType, offset = m_resItemOffset))
-				
-				if m_itemType == "VRAM_DESC":
-					bs.seek(m_resItemOffset + start + 56)
-					texHash = bs.readUInt64()
-					texPath = readStringAt(bs, m_resItemOffset + start + 112)
-					splitted = rapi.getLocalFileName(texPath.replace(".tga/", "+")).split("+", 1)
-					texName = splitted[0] + texoutExt
-					if len(splitted) > 1:
-						if texName in vramNames:
-							texName = (splitted[0] + "_" + splitted[1]).replace(".ndb", texoutExt) #add hash to duplicate texture names
-						vramNames[texName] = True
-						self.vrams[texHash] = [m_resItemOffset + start, texName, [], None]
-				
-				if m_itemType == "JOINT_HIERARCHY":
-					self.jointOffset = (m_resItemOffset, start)
-					
-				if m_itemType == "GEOMETRY_1":
-					self.geoOffset = (m_resItemOffset, start)
-					m_numSubMeshDesc = readUIntAt(bs, self.geoOffset[0] + self.geoOffset[1] + 32 + 8)
-					bs.seek(self.geoOffset[0] + self.geoOffset[1] + 32 + 40)
-					SubmeshesOffs = readPointerFixup()
-					for i in range(m_numSubMeshDesc):
-						bs.seek(SubmeshesOffs + 176*i + 104)
-						self.needsBasePak = self.needsBasePak or not not bs.readUInt64()
-					
-				bs.seek(place)
-		#self.readPakHeader = True
+					self.checkResItem(start, m_resItemOffset, m_itemType)
+					bs.seek(place)
 	
 	def readPak(self):
 		
@@ -1644,7 +1946,7 @@ class PakFile:
 		if self.jointOffset:
 			start = self.jointOffset[1]
 			print("Found Joint Hierarchy") # offset", self.jointOffset[0] + start, ", location:", self.jointOffset[0] + start + 20 + 32)
-			bs.seek(self.jointOffset[0] + start + 20 + 32)
+			bs.seek(self.jointOffset[0] + start + 20 + ResItemPaddingSz)
 			boneCount = bs.readUInt()
 			bs.seek(8,1)
 			xformsOffset = readPointerFixup()
@@ -1736,7 +2038,7 @@ class PakFile:
 						if boneNames[bId].find(matchedName) != -1:
 							bFound = True
 							self.boneList.append(NoeBone(startBoneIdx + b, boneNames[b], mat, None, parentList[b][1]))
-							if parentList[b][1] == -1 or (dialogOptions.reparentHelpers and (endName == "helper" or endName == "grp")):
+							if parentList[b][1] == -1 or (dialogOptions.reparentHelpers and (endName == "helper" or endName == "grp")): # or endName == "mover"
 								self.boneList[len(self.boneList)-1].parentIndex = bId
 							break
 					if not bFound:
@@ -1757,7 +2059,7 @@ class PakFile:
 			lastLOD = 0
 			self.submeshes = []
 			
-			bs.seek(self.geoOffset[0] + start + 32)
+			bs.seek(self.geoOffset[0] + start + ResItemPaddingSz)
 			
 			m_version = bs.readUInt()
 			m_isForeground = bs.readUInt()
@@ -1802,21 +2104,17 @@ class PakFile:
 					submeshDescs.append(LODSubmeshDesc(name=submeshName,  address=firstSubmeshDescOffs + 16*s, offset=submeshOffs, index=submeshIdx))
 				self.lods.append(submeshDescs)
 			'''
-			#print("self.lods", self.lods)
-			
-			
-			
 			for i in range(m_numSubMeshDesc):
 				bs.seek(SubmeshesOffs + 176*i)
-				if dialogOptions.isTLOU2:
+				if dialogOptions.isTLOU2 or dialogOptions.isTLOUP1:
 					bbox = [[bs.readFloat(), bs.readFloat(), bs.readFloat(), bs.readFloat()], [bs.readFloat(), bs.readFloat(), bs.readFloat(), bs.readFloat()]]
-					submeshName = readStringAt(bs, readPointerFixup()).split("|")
+					submeshName = readStringAt(bs, readPointerFixup() or start).split("|")
 					submeshName = submeshName[len(submeshName)-1]
 					ukn64_0 = bs.readUInt64()
 					m_pStreamDesc = readPointerFixup()
 					ukn64_1 = bs.readUInt64()
 					facesOffsetAddr = bs.tell()
-					m_pIndexes = readPointerFixup()
+					m_pIndexes = readPointerFixup(True)
 					m_material = readPointerFixup()
 					ukn64_2 = bs.readUInt64()
 					skindataOffset = readPointerFixup()
@@ -1884,10 +2182,10 @@ class PakFile:
 				
 				for j in range(m_numStreamSource):
 					
-					if dialogOptions.isTLOU2:
+					if dialogOptions.isTLOU2 or dialogOptions.isTLOUP1:
 						bs.seek(m_pStreamDesc + 64*j)
 						buffOffsAddr = bs.tell()
-						m_bufferOffset = readPointerFixup()
+						m_bufferOffset = readPointerFixup(True)
 						numVerts = bs.readUInt()
 						uknInt = bs.readUInt()
 						bufferSize = bs.readUInt()
@@ -1904,8 +2202,8 @@ class PakFile:
 						
 						qOffs = NoeVec4((bs.readFloat(), bs.readFloat(), bs.readFloat(), bs.readFloat()))
 						bs.readFloat()
-						
-						streamDescs.append(T2StreamDesc(type=m_compType, offset=m_bufferOffset, stride=m_stride, bufferOffsetAddr=buffOffsAddr, sizes=sizes, qScale=qScale, qOffs=qOffs, numVerts=numVerts))
+						desc = T2StreamDesc(type=m_compType, offset=m_bufferOffset, stride=m_stride, bufferOffsetAddr=buffOffsAddr, sizes=sizes, qScale=qScale, qOffs=qOffs, numVerts=numVerts)
+						streamDescs.append(desc)
 					else:
 						bs.seek(m_pStreamDesc + 24*j)
 						m_numAttributes = bs.readUByte()
@@ -1929,10 +2227,10 @@ class PakFile:
 				
 				self.submeshes.append(PakSubmesh(submeshName, m_numVertexes, m_numIndexes, m_pIndexes, streamDescs))
 				self.submeshes[i].facesOffsetAddr = facesOffsetAddr
-				if dialogOptions.isTLOU2:
+				if dialogOptions.isTLOU2 or dialogOptions.isTLOUP1:
 					self.submeshes[i].bbox = bbox
 				
-				self.submeshes[i].streamsAddr = m_compInfoOffs if not dialogOptions.isTLOU2 else None
+				self.submeshes[i].streamsAddr = m_compInfoOffs if not dialogOptions.isTLOU2 and not dialogOptions.isTLOUP1 else None
 				
 				if nrmRecalcDescOffs:
 					bs.seek(nrmRecalcDescOffs)
@@ -1952,19 +2250,19 @@ class PakFile:
 					numWeights = bs.readUInt()
 					uknSD2 = bs.readUInt()
 					uknSD3 = bs.readUInt()
-					bIndicesOffs = readPointerFixup()
-					weightsOffs = readPointerFixup()
+					bIndicesOffs = readPointerFixup(dialogOptions.isTLOUP1)
+					weightsOffs = readPointerFixup(dialogOptions.isTLOUP1)
 					
-					self.submeshes[i].skinDesc = SkinDesc(mapOffset=bIndicesOffs, weightsOffset=weightsOffs, weightCount=numWeights, mapOffsetAddr=bs.tell()-16, weightOffsetAddr=bs.tell()-8)
+					self.submeshes[i].skinDesc = SkinDesc(mapOffset=bIndicesOffs, weightsOffset=weightsOffs, weightCount=numWeights, mapOffsetAddr=bs.tell()-16, weightOffsetAddr=bs.tell()-8, uncompressed=(dialogOptions.isTLOUP1 and uknSD2 > 0))
 					
 				bs.seek(m_material)
 				shaderAssetNameOffs = readPointerFixup()
 				shaderTypeOffs = readPointerFixup()
 				
 				
-				if dialogOptions.isTLOU2:
+				if dialogOptions.isTLOU2 or dialogOptions.isTLOUP1:
 					UUID = bs.readUInt64()
-					shaderParamsOffs = readPointerFixup()
+					shaderParamsOffs = readPointerFixup(True)
 					texDescsListOffs = readPointerFixup()
 					shaderNamesOffs = readPointerFixup()
 					uknOffs = readPointerFixup()
@@ -2000,10 +2298,10 @@ class PakFile:
 					loadedDiffuse = loadedNormal = loadedTrans = loadedSpec = loadedMetal = loadedRoughness = loadedOcc = False
 					
 					for j in range(texCount):
-						bs.seek(texDescsListOffs + (40+8*dialogOptions.isTLOU2)*j )
+						bs.seek(texDescsListOffs + (40+8*(dialogOptions.isTLOU2 or dialogOptions.isTLOUP1))*j )
 						nameAddr = readPointerFixup()
 						name = readStringAt(bs, nameAddr)
-						bs.seek(8+8*dialogOptions.isTLOU2,1) #path = readStringAt(bs, readPointerFixup())
+						bs.seek(8+8*(dialogOptions.isTLOU2 or dialogOptions.isTLOUP1),1) #path = readStringAt(bs, readPointerFixup())
 						bs.seek(readPointerFixup())
 						path = readStringAt(bs, readPointerFixup())
 						vramHash = bs.readUInt64()
@@ -2018,8 +2316,8 @@ class PakFile:
 								doSet = loadedNormal = vramHash
 								material.setNormalTexture(texFileName)
 								if dialogOptions.doConvertTex:
+									#if gameName != "TLOUP1":
 									material.flags |= noesis.NMATFLAG_NORMALMAP_FLIPY #| noesis.NMATFLAG_NORMALMAP_NODERZ
-									
 									if name.find("NR") != -1 and texFileName.find("-ao") != -1: # Ambient Occlusion
 										self.vrams[vramHash][2].append(texFileName.replace(texoutExt, "_NoesisAO" + texoutExt))
 										material.setOcclTexture(self.vrams[vramHash][2][len(self.vrams[vramHash][2])-1])
@@ -2088,10 +2386,11 @@ class PakFile:
 					params = {}
 					setBaseColor = setSpecScale = setRoughness = setMetal = False
 					outstring = "\n" + matKey + "material parameters:"
+					print("shaderParamsOffs", shaderParamsOffs)
 					
 					for j in range(paramCount):
 						bs.seek(shaderParamsOffs + 24*j)
-						name = readStringAt(bs, readPointerFixup())
+						name = readStringAt(bs, readPointerFixup(True))
 						valueOffset = readPointerFixup()
 						numFloats = bs.readUInt()
 						bs.seek(valueOffset)
@@ -2185,8 +2484,7 @@ class PakFile:
 				for j, sd in enumerate(sm.streamDescs):
 				
 					bs.seek(sd.offset)
-					if dialogOptions.isTLOU2:
-						#this works:
+					if dialogOptions.isTLOU2 or dialogOptions.isTLOUP1:
 						if j == 0 and sd.stride==12:
 							rapi.rpgBindPositionBuffer(bs.readBytes(12 * sm.numVerts), noesis.RPGEODATA_FLOAT, 12)
 						elif sd.type == 1:
@@ -2250,18 +2548,22 @@ class PakFile:
 					weightList = []
 					for v, offsetsCounts in enumerate(vertWeightOffsets):
 						bs.seek(sm.skinDesc.weightsOffset + offsetsCounts[1])
-						tupleList = []
 						for w in range(12):
 							if w >= offsetsCounts[0]:
 								weightList.append(0)
 								idsList.append(0)
+							elif sm.skinDesc.uncompressed:
+								weightList.append(bs.readFloat())
+								idsList.append(bs.readUInt())
 							else:
 								weightList.append(bs.readBits(22))
 								idsList.append(bs.readBits(10) + startingBonesCt)
-								
-					rapi.rpgBindBoneIndexBufferOfs(struct.pack("<" + 'H'*len(idsList), *idsList), noesis.RPGEODATA_USHORT, 24, 0, 12)
-					rapi.rpgBindBoneWeightBufferOfs(struct.pack("<" + 'I'*len(weightList), *weightList), noesis.RPGEODATA_UINT, 48, 0, 12)
-				
+					if sm.skinDesc.uncompressed:
+						rapi.rpgBindBoneIndexBufferOfs(struct.pack("<" + 'I'*len(idsList), *idsList), noesis.RPGEODATA_UINT, 48, 0, 12)
+						rapi.rpgBindBoneWeightBufferOfs(struct.pack("<" + 'f'*len(weightList), *weightList), noesis.RPGEODATA_FLOAT, 48, 0, 12)
+					else:
+						rapi.rpgBindBoneIndexBufferOfs(struct.pack("<" + 'H'*len(idsList), *idsList), noesis.RPGEODATA_USHORT, 24, 0, 12)
+						rapi.rpgBindBoneWeightBufferOfs(struct.pack("<" + 'I'*len(weightList), *weightList), noesis.RPGEODATA_UINT, 48, 0, 12)
 				try:
 					bs.seek(sm.facesOffset)
 					rapi.rpgCommitTriangles(bs.readBytes(2 * sm.numIndices), noesis.RPGEODATA_USHORT, sm.numIndices, noesis.RPGEO_TRIANGLE, 0x1)
@@ -2274,7 +2576,7 @@ class PakFile:
 			sortedTupleList = sorted([ (subTuple[1], subTuple[0]) for hash, subTuple in self.vrams.items() ])
 			for sortTuple in sortedTupleList:
 				if sortTuple[0]:
-					print("    " + sortTuple[0].replace(".tga", texoutExt) + "  --  " + dxFormat.get(readUIntAt(bs, sortTuple[1]+72)))
+					print("    " + sortTuple[0].replace(".tga", texoutExt) + "  --  " + str(dxFormat.get(readUIntAt(bs, sortTuple[1]+72))))
 			print("")
 			
 		else:
@@ -2381,7 +2683,6 @@ def pakWriteModel(mdl, bs):
 	
 	noesis.logPopup()
 	print("\n\n	Naughty Dog PAK model export", Version, "by alphaZomega\n")
-	texOnly = noesis.optWasInvoked("-t")
 	gameName = getGameName()
 	
 	def getExportName(fileName):		
@@ -2426,8 +2727,8 @@ def pakWriteModel(mdl, bs):
 	
 	f = NoeBitStream(srcMesh)
 	magic = readUIntAt(f, 0) 
-	if magic != 2681 and magic != 68217 and magic != 2147486329:
-		print("Not a .pak file.\nAborting...")
+	if magic != 2681 and magic != 68217 and magic != 2147486329 and magic != 2685:
+		print("Not a known .pak file.\nAborting...")
 		return 0
 	
 	#copy file:
@@ -2439,6 +2740,10 @@ def pakWriteModel(mdl, bs):
 			dialogOptions.baseSkeleton = fileName
 			
 	source.readPakHeader()
+	texOnly = noesis.optWasInvoked("-t") or dialogOptions.isTLOU2
+	if texOnly:
+		print("Embedding textures only")
+	
 	if source.needsBasePak and not rapi.checkFileExists(BaseDirectories[gameName] + (dialogOptions.baseSkeleton or "")):
 		dialogOptions.baseSkeleton = injectMeshName.replace(".pak", "-base.pak")
 		while dialogOptions.baseSkeleton != None and not rapi.checkFileExists(dialogOptions.baseSkeleton):
@@ -2835,6 +3140,8 @@ def pakWriteModel(mdl, bs):
 			path = noesis.optGetArg("-texfolder")
 		print("\nChecking for textures to embed in:\n -", path, "\n -", path2)
 		path = path2 if not os.path.isdir(path) else path
+		#texInjectExt = ".tga" if dialogOptions.isTLOU2 else texoutExt
+		
 		if os.path.isdir(path):
 			source.bs = bs
 			vramPathDict = {}
@@ -2842,7 +3149,7 @@ def pakWriteModel(mdl, bs):
 				vramPathDict[vramTuple[1]] = (vramTuple[0], hash)
 				
 			for fileName in os.listdir(path):
-				if os.path.isfile(os.path.join(path, fileName)) and fileName.find(texoutExt) != -1:
+				if os.path.isfile(os.path.join(path, fileName)) and fileName.count(texoutExt):
 					vramTuple = vramPathDict.get(fileName)
 					if vramTuple:
 						print("\nEmbedding texture", fileName)
