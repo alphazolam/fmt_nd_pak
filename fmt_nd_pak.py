@@ -1,7 +1,7 @@
 #fmt_nd_pak.py - Naughty Dog ".pak" plugin for Rich Whitehouse's Noesis
 #Author: alphaZomega 
 #Special Thanks: icemesh 
-Version = 'v1.52 (April 1, 2023)'
+Version = 'v1.53 (April 1, 2023)'
 
 
 #Options: These are global options that change or enable/disable certain features
@@ -2219,6 +2219,7 @@ class PakFile:
 						bs.seek(m_pStreamDesc + 64*j)
 						buffOffsAddr = bs.tell()
 						m_bufferOffset = readPointerFixup(True)
+						
 						numVerts = bs.readUInt()
 						uknInt = bs.readUInt()
 						bufferSize = bs.readUInt()
@@ -2236,7 +2237,8 @@ class PakFile:
 						qOffs = NoeVec4((bs.readFloat(), bs.readFloat(), bs.readFloat(), bs.readFloat()))
 						bs.readFloat()
 						desc = T2StreamDesc(type=m_compType, offset=m_bufferOffset, stride=m_stride, bufferOffsetAddr=buffOffsAddr, sizes=sizes, qScale=qScale, qOffs=qOffs, numVerts=numVerts)
-						streamDescs.append(desc)
+						if desc.offset < bs.getSize():
+							streamDescs.append(desc)
 					else:
 						bs.seek(m_pStreamDesc + 24*j)
 						m_numAttributes = bs.readUByte()
@@ -2429,16 +2431,19 @@ class PakFile:
 							usedTextures.append(texFileName)
 					
 					if not loadedDiffuse and secondaryDiffuse:
+						loadedDiffuse = True
 						material.setTexture(secondaryDiffuse[0])
 						if secondaryDiffuse[0] not in usedTextures:
 							self.vramHashes.append(secondaryDiffuse[1])
 							usedTextures.append(secondaryDiffuse[0])
 					if not loadedNormal and secondaryNormal:
+						loadedNormal = True
 						material.setNormalTexture(secondaryNormal[0])
 						if secondaryNormal[0] not in usedTextures:
 							self.vramHashes.append(secondaryNormal[1])
 							usedTextures.append(secondaryNormal[0])
 					if not loadedTrans and secondaryAlpha:
+						loadedTrans = True
 						material.setAlphaTest(0.25)
 						material.setOpacityTexture(secondaryAlpha[0])
 						if secondaryAlpha[0] not in usedTextures:
@@ -2559,11 +2564,12 @@ class PakFile:
 				posStride = 12
 				
 				for j, sd in enumerate(sm.streamDescs):
-				
+					print(i, sd.offset)
 					bs.seek(sd.offset)
 					if dialogOptions.isTLOU2 or dialogOptions.isTLOUP1:
 						if j == 0 and sd.stride==12:
-							posBuff = bs.readBytes(12 * sm.numVerts)
+							posBuff = bs.readBytes(sd.stride * sm.numVerts)
+							posStride = sd.stride
 						elif sd.type == 1:
 							rapi.rpgBindUV1Buffer(bs.readBytes(4 * sm.numVerts), noesis.RPGEODATA_HALFFLOAT, 4)
 						elif sd.type == 2:
@@ -2578,10 +2584,12 @@ class PakFile:
 								for c in range(4):
 									if sd.sizes[c]:
 										floatsList.append(bs.readBits(sd.sizes[c]) * sd.qScale[c] + sd.qOffs[c])
+									elif sd.type == 64 and c < 3:
+										floatsList.append(sd.qScale[c] + sd.qOffs[c])
 							floatsBuffer = struct.pack("<" + 'f'*len(floatsList), *floatsList)
 							#try:
 							if floatsBuffer:
-								if sd.type == 64: 
+								if sd.type == 64:
 									posBuff = floatsBuffer
 								elif sd.type == 65: 
 									rapi.rpgBindUV1Buffer(floatsBuffer, noesis.RPGEODATA_FLOAT, 8)
@@ -2589,6 +2597,8 @@ class PakFile:
 									rapi.rpgBindUV2Buffer(floatsBuffer, noesis.RPGEODATA_FLOAT, 8)
 								elif sd.type == 76: 
 									rapi.rpgBindUVXBuffer(floatsBuffer, noesis.RPGEODATA_FLOAT, 8, 2, sd.numVerts)
+								else:
+									print("Buffer type not read:", sd.type)
 							#except:
 							#	print("Failed to bind buffer type", sd.type)
 					else:
@@ -2596,7 +2606,6 @@ class PakFile:
 						if j == 0:
 							posBuff = bs.readBytes(sd.stride * sm.numVerts)
 							posStride = sd.stride
-							#rapi.rpgBindPositionBuffer(, noesis.RPGEODATA_FLOAT if posStride==12 else noesis.RPGEODATA_HALFFLOAT, posStride)
 						#UVs
 						elif sd.type == 34: 
 							foundUVs += 1
@@ -2649,16 +2658,21 @@ class PakFile:
 				faceBuffer = bs.readBytes(2 * sm.numIndices)
 				instanceList = self.xforms.get(sm.offset) or [None]
 				firstPosBuff = movePositionsBuffer(posBuff, instanceList[0], posStride)
+				success = False
+				
 				try:
+					idxList = [(struct.unpack_from('H', faceBuffer, i*2))[0] for i in range(int(len(faceBuffer)/2))]
 					rapi.rpgBindPositionBuffer(firstPosBuff, noesis.RPGEODATA_FLOAT if posStride==12 else noesis.RPGEODATA_HALFFLOAT, posStride)
 					rapi.rpgCommitTriangles(faceBuffer, noesis.RPGEODATA_USHORT, sm.numIndices, noesis.RPGEO_TRIANGLE, 0x1)
+					success = True
+				except:
+					print("Failed to bind submesh", i)
+					
+				if success:
 					for i in range(1, len(instanceList)):
 						rapi.rpgSetName(sm.name + "#" + str(i))
 						rapi.rpgBindPositionBuffer(movePositionsBuffer(posBuff, instanceList[i], posStride), noesis.RPGEODATA_FLOAT if posStride==12 else noesis.RPGEODATA_HALFFLOAT, posStride)
 						rapi.rpgCommitTriangles(faceBuffer, noesis.RPGEODATA_USHORT, sm.numIndices, noesis.RPGEO_TRIANGLE, 0x1)
-				except:
-					print("Failed to bind submesh", i)
-					print(len(posBuff), len(faceBuffer))
 				
 				rapi.rpgClearBufferBinds()
 				
